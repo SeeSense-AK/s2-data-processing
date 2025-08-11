@@ -49,11 +49,38 @@ class DailyCombiner:
         """Get yesterday's date in YYYY/MM/DD format."""
         return (datetime.utcnow() - timedelta(days=1)).strftime('%Y/%m/%d')
     
+    def get_today(self):
+        """Get today's date in YYYY/MM/DD format for testing."""
+        return datetime.utcnow().strftime('%Y/%m/%d')
+    
     def prompt_for_date(self, default_date):
         """Prompt user for date to process, with default being yesterday."""
         try:
-            date_input = input(f"Enter the date to process (YYYY/MM/DD) [default: {default_date}]: ")
-            return date_input.strip() or default_date
+            print(f"\nAvailable options:")
+            print(f"1. Yesterday: {self.get_yesterday()}")
+            print(f"2. Today: {self.get_today()}")
+            print(f"3. Custom date")
+            
+            choice = input(f"Select option (1-3) or press Enter for yesterday [{default_date}]: ").strip()
+            
+            if choice == '1' or choice == '':
+                return self.get_yesterday()
+            elif choice == '2':
+                return self.get_today()
+            elif choice == '3':
+                date_input = input("Enter custom date (YYYY/MM/DD): ").strip()
+                if date_input:
+                    # Validate date format
+                    try:
+                        datetime.strptime(date_input, '%Y/%m/%d')
+                        return date_input
+                    except ValueError:
+                        print("Invalid date format. Using default.")
+                        return default_date
+                return default_date
+            else:
+                return default_date
+                
         except KeyboardInterrupt:
             self.logger.info("Process interrupted by user")
             sys.exit(0)
@@ -206,6 +233,21 @@ class DailyCombiner:
             
             if not files_to_process:
                 self.logger.warning(f"No files found for date {date_str}")
+                self.logger.info(f"Checked path: s3://{self.bucket}/{source_prefix}")
+                
+                # Let's also try to list what's available in the parent directory
+                parent_prefix = "/".join(source_prefix.rstrip('/').split('/')[:-1]) + "/"
+                self.logger.info(f"Checking parent directory: s3://{self.bucket}/{parent_prefix}")
+                parent_files = self.aws_helper.list_files(parent_prefix)
+                if parent_files:
+                    available_dates = set()
+                    for file in parent_files:
+                        parts = file.replace(parent_prefix, '').split('/')
+                        if len(parts) >= 3:
+                            available_dates.add(f"{parts[0]}/{parts[1]}/{parts[2]}")
+                    if available_dates:
+                        self.logger.info(f"Available dates in bucket: {sorted(available_dates)}")
+                
                 return False
                 
             self.logger.info(f"Found {len(files_to_process)} files to process")
@@ -216,7 +258,7 @@ class DailyCombiner:
                 return False
             
             # Combine CSV files
-            combined_csv_path = self.combined_dir / 'combined.csv'
+            combined_csv_path = self.combined_dir / f'combined_{date_str.replace("/", "")}.csv'
             if not self.combine_csv_files(combined_csv_path):
                 self.logger.error("Failed to combine CSV files")
                 return False
@@ -227,6 +269,7 @@ class DailyCombiner:
             
             if self.aws_helper.upload_file(str(combined_csv_path), destination_key):
                 self.logger.info("Successfully uploaded combined file to S3")
+                self.logger.info(f"✅ File available at: s3://{self.bucket}/{destination_key}")
                 
                 # Clean up temporary files if in non-interactive mode
                 if not interactive:
