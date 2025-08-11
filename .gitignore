@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Conda/Virtual environments
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.conda/
+
+# Data files (don't commit actual data)
+data/downloadedfiles/*
+data/combinedfile/*
+data/preprocessed/*
+data/processed/*
+!data/*/.gitkeep
+!data/*/*/.gitkeep
+
+# Logs
+logs/*.log
+logs/*.out
+logs/*.err
+
+# AWS credentials and sensitive config
+config/aws_config.json
+config/.env
+.aws/
+*.pem
+*.key
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS specific
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Jupyter Notebooks checkpoints
+.ipynb_checkpoints
+
+# pytest cache
+.pytest_cache/
+.cache
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Temporary files
+*.tmp
+*.temp
+temp/
