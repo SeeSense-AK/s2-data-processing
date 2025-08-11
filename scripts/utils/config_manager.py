@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Configuration Manager for S2 Data Pipeline
-Handles loading and validation of configuration files.
+Configuration Manager
+Handles loading and accessing configuration from JSON files.
 
 Author: SeeSense Data Pipeline
 """
@@ -9,64 +9,124 @@ Author: SeeSense Data Pipeline
 import json
 import os
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 
 class ConfigManager:
-    """Manages pipeline configuration from JSON files."""
+    """Manages configuration loading and access."""
     
-    def __init__(self, config_path=None):
-        """Initialize ConfigManager with optional custom config path."""
+    def __init__(self, config_path: Optional[str] = None):
+        """
+        Initialize ConfigManager.
+        
+        Args:
+            config_path: Path to configuration file. If None, uses default location.
+        """
+        self.project_root = Path(__file__).parent.parent.parent
+        
         if config_path:
             self.config_path = Path(config_path)
         else:
-            # Default to config/pipeline_config.json relative to project root
-            project_root = Path(__file__).parent.parent.parent
-            self.config_path = project_root / 'config' / 'pipeline_config.json'
+            self.config_path = self.project_root / "config" / "pipeline_config.json"
         
-        self.config = self._load_config()
+        self.aws_config_path = self.project_root / "config" / "aws_config.json"
+        self.device_mapping_path = self.project_root / "config" / "device_mapping.json"
+        
+        self._config = None
+        self._aws_config = None
+        self._device_mapping = None
+        
+        # Load configurations
+        self._load_config()
         self._load_aws_config()
+        self._load_device_mapping()
     
     def _load_config(self):
-        """Load the main pipeline configuration."""
+        """Load main pipeline configuration."""
         try:
             with open(self.config_path, 'r') as f:
-                config = json.load(f)
-            return config
+                self._config = json.load(f)
+            
+            # Replace {username} placeholder with actual username
+            username = os.getenv('USER') or os.getenv('USERNAME') or 'user'
+            self._replace_placeholders(self._config, {'username': username})
+            
         except FileNotFoundError:
             raise FileNotFoundError(f"Configuration file not found: {self.config_path}")
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in configuration file: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Error loading configuration: {e}")
     
     def _load_aws_config(self):
-        """Load AWS credentials configuration."""
-        aws_config_path = self.config_path.parent / 'aws_config.json'
-        
+        """Load AWS configuration."""
         try:
-            with open(aws_config_path, 'r') as f:
-                aws_config = json.load(f)
-                # Merge AWS config into main config
-                self.config['aws'].update(aws_config)
-        except FileNotFoundError:
-            # Try to get AWS credentials from environment variables
-            aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
-            aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-            
-            if aws_access_key and aws_secret_key:
-                self.config['aws'].update({
-                    'access_key_id': aws_access_key,
-                    'secret_access_key': aws_secret_key
-                })
+            if self.aws_config_path.exists():
+                with open(self.aws_config_path, 'r') as f:
+                    self._aws_config = json.load(f)
             else:
-                print("⚠️  AWS credentials not found in config file or environment variables")
-                print("   Make sure to either:")
-                print("   1. Create config/aws_config.json with your AWS credentials")
-                print("   2. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables")
-                print("   3. Use AWS CLI configured credentials")
+                # Use environment variables if config file doesn't exist
+                self._aws_config = {
+                    'aws_access_key_id': os.getenv('AWS_ACCESS_KEY_ID'),
+                    'aws_secret_access_key': os.getenv('AWS_SECRET_ACCESS_KEY'),
+                    'region': os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
+                }
+                
+                # Validate that we have credentials
+                if not all([self._aws_config['aws_access_key_id'], 
+                           self._aws_config['aws_secret_access_key']]):
+                    raise ValueError("AWS credentials not found in config file or environment variables")
+                    
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in AWS configuration file: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Error loading AWS configuration: {e}")
     
-    def get(self, key, default=None):
-        """Get configuration value using dot notation (e.g., 'aws.bucket_name')."""
+    def _load_device_mapping(self):
+        """Load device mapping configuration."""
+        try:
+            if self.device_mapping_path.exists():
+                with open(self.device_mapping_path, 'r') as f:
+                    self._device_mapping = json.load(f)
+            else:
+                # Create default empty mapping
+                self._device_mapping = {
+                    "device_regions": {},
+                    "region_info": {}
+                }
+                
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in device mapping file: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Error loading device mapping: {e}")
+    
+    def _replace_placeholders(self, obj: Any, replacements: Dict[str, str]):
+        """Recursively replace placeholders in configuration."""
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                obj[key] = self._replace_placeholders(value, replacements)
+        elif isinstance(obj, list):
+            for i, item in enumerate(obj):
+                obj[i] = self._replace_placeholders(item, replacements)
+        elif isinstance(obj, str):
+            for placeholder, replacement in replacements.items():
+                obj = obj.replace(f'{{{placeholder}}}', replacement)
+        
+        return obj
+    
+    def get(self, key: str, default: Any = None) -> Any:
+        """
+        Get configuration value using dot notation.
+        
+        Args:
+            key: Configuration key using dot notation (e.g., 'aws.bucket_name')
+            default: Default value if key not found
+            
+        Returns:
+            Configuration value or default
+        """
         keys = key.split('.')
-        value = self.config
+        value = self._config
         
         try:
             for k in keys:
@@ -75,27 +135,115 @@ class ConfigManager:
         except (KeyError, TypeError):
             return default
     
-    def get_aws_config(self):
-        """Get AWS-specific configuration."""
-        return self.config.get('aws', {})
+    def get_aws_config(self) -> Dict[str, Any]:
+        """Get AWS configuration."""
+        return self._aws_config.copy() if self._aws_config else {}
     
-    def get_osrm_servers(self):
-        """Get OSRM server configurations."""
-        return self.config.get('osrm_servers', {})
+    def get_device_mapping(self) -> Dict[str, Any]:
+        """Get device mapping configuration."""
+        return self._device_mapping.copy() if self._device_mapping else {}
     
-    def get_log_config(self):
+    def get_log_config(self) -> Dict[str, Any]:
         """Get logging configuration."""
-        return self.config.get('logging', {})
+        return {
+            'level': self.get('logging.level', 'INFO'),
+            'format': self.get('logging.format', '%(asctime)s - %(name)s - %(levelname)s - %(message)s'),
+            'max_file_size_mb': self.get('logging.max_file_size_mb', 10),
+            'backup_count': self.get('logging.backup_count', 5),
+            'logs_dir': self.get('directories.logs_dir', 'logs')
+        }
     
-    def validate_config(self):
-        """Validate that required configuration values are present."""
+    def get_osrm_servers(self) -> Dict[str, Dict[str, Any]]:
+        """Get OSRM server configurations."""
+        return self.get('osrm_servers', {})
+    
+    def get_region_for_device(self, device_name: str) -> Optional[str]:
+        """
+        Get region for a specific device based on its name prefix.
+        
+        Args:
+            device_name: Device name/identifier
+            
+        Returns:
+            Region name or None if not found
+        """
+        device_prefixes = self._device_mapping.get('device_prefixes', {})
+        
+        # Check each region's prefixes
+        for region, prefixes in device_prefixes.items():
+            for prefix in prefixes:
+                if device_name.upper().startswith(prefix.upper()):
+                    return region
+        
+        # Fallback: check old device_regions format for backward compatibility
+        device_regions = self._device_mapping.get('device_regions', {})
+        for region, devices in device_regions.items():
+            if device_name in devices:
+                return region
+        
+        return None
+    
+    def get_devices_for_region(self, region: str) -> list:
+        """
+        Get list of device prefixes for a specific region.
+        
+        Args:
+            region: Region name
+            
+        Returns:
+            List of device prefixes for the region
+        """
+        device_prefixes = self._device_mapping.get('device_prefixes', {})
+        return device_prefixes.get(region, [])
+    
+    def get_all_regions(self) -> list:
+        """Get list of all configured regions."""
+        device_prefixes = self._device_mapping.get('device_prefixes', {})
+        device_regions = self._device_mapping.get('device_regions', {})
+        
+        # Combine both sources and remove duplicates
+        all_regions = list(set(list(device_prefixes.keys()) + list(device_regions.keys())))
+        return all_regions
+    
+    def get_region_info(self, region: str) -> Dict[str, Any]:
+        """
+        Get information for a specific region.
+        
+        Args:
+            region: Region name
+            
+        Returns:
+            Region information dictionary
+        """
+        return self._device_mapping.get('region_info', {}).get(region, {})
+    
+    def get_region_info(self, region: str) -> Dict[str, Any]:
+        """
+        Get information for a specific region.
+        
+        Args:
+            region: Region name
+            
+        Returns:
+            Region information dictionary
+        """
+        return self._device_mapping.get('region_info', {}).get(region, {})
+    
+    def validate_config(self) -> bool:
+        """
+        Validate that all required configuration is present.
+        
+        Returns:
+            True if configuration is valid
+            
+        Raises:
+            ValueError: If configuration is invalid
+        """
         required_keys = [
             'aws.bucket_name',
             'aws.source_prefix',
             'aws.daily_csv_prefix',
-            'directories.base_dir',
-            'directories.download_dir',
-            'directories.combined_dir'
+            'directories.base_dir'
         ]
         
         missing_keys = []
@@ -106,38 +254,26 @@ class ConfigManager:
         if missing_keys:
             raise ValueError(f"Missing required configuration keys: {missing_keys}")
         
-        # Validate OSRM servers
-        osrm_servers = self.get_osrm_servers()
-        if not osrm_servers:
-            print("⚠️  No OSRM servers configured")
+        # Validate AWS config
+        aws_config = self.get_aws_config()
+        if not aws_config.get('aws_access_key_id') or not aws_config.get('aws_secret_access_key'):
+            raise ValueError("AWS credentials are required")
         
         return True
     
-    def get_device_mapping_path(self):
-        """Get path to device mapping configuration."""
-        return self.config_path.parent / 'device_mapping.json'
+    def reload(self):
+        """Reload all configuration files."""
+        self._load_config()
+        self._load_aws_config()
+        self._load_device_mapping()
     
-    def load_device_mapping(self):
-        """Load device to region mapping."""
-        mapping_path = self.get_device_mapping_path()
+    def __str__(self) -> str:
+        """String representation of the configuration (without sensitive data)."""
+        safe_config = self._config.copy() if self._config else {}
         
-        try:
-            with open(mapping_path, 'r') as f:
-                return json.load(f)
-        except FileNotFoundError:
-            print(f"⚠️  Device mapping file not found: {mapping_path}")
-            return {}
-    
-    def __str__(self):
-        """String representation of configuration (without sensitive data)."""
-        safe_config = self.config.copy()
-        
-        # Remove sensitive AWS credentials
+        # Remove sensitive information
         if 'aws' in safe_config:
-            aws_config = safe_config['aws'].copy()
-            for sensitive_key in ['access_key_id', 'secret_access_key']:
-                if sensitive_key in aws_config:
-                    aws_config[sensitive_key] = '***'
-            safe_config['aws'] = aws_config
+            safe_config['aws'] = {k: v for k, v in safe_config['aws'].items() 
+                                 if 'key' not in k.lower() and 'secret' not in k.lower()}
         
         return json.dumps(safe_config, indent=2)
