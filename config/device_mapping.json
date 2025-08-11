@@ -1,0 +1,36 @@
+{
+  "device_prefixes": {
+    "england": ["AS", "BAE", "BR", "KEE", "MK", "SBY", "AB", "AD", "AC", "HL", "AH", "GH"],
+    "sydney": ["TEBT"],
+    "finland": ["HEL"],
+    "ireland": ["SPIN", "XX"],
+    "wales": ["SW"]
+  },
+  "region_info": {
+    "england": {
+      "country": "United Kingdom",
+      "timezone": "Europe/London",
+      "osrm_port": 5005
+    },
+    "sydney": {
+      "country": "Australia",
+      "timezone": "Australia/Sydney", 
+      "osrm_port": 5003
+    },
+    "finland": {
+      "country": "Finland",
+      "timezone": "Europe/Helsinki",
+      "osrm_port": 5001
+    },
+    "ireland": {
+      "country": "Ireland", 
+      "timezone": "Europe/Dublin",
+      "osrm_port": 5002
+    },
+    "wales": {
+      "country": "United Kingdom",
+      "timezone": "Europe/London",
+      "osrm_port": 5004
+    }
+  }
+}
