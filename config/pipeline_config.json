@@ -1,0 +1,61 @@
+{
+  "aws": {
+    "bucket_name": "seesense-air",
+    "source_prefix": "summit2/mqtt-flespi-barra/csv/",
+    "daily_csv_prefix": "summit2/mqtt-flespi-barra/test-dailycsv/",
+    "daily_trips_prefix": "summit2/mqtt-flespi-barra/test-dailytripscsv/",
+    "region": "eu-west-1"
+  },
+  "osrm_servers": {
+    "finland": {
+      "host": "localhost",
+      "port": 5001,
+      "container_name": "osrm-finland"
+    },
+    "ireland": {
+      "host": "localhost",
+      "port": 5002,
+      "container_name": "osrm-ireland"
+    },
+    "sydney": {
+      "host": "localhost",
+      "port": 5003,
+      "container_name": "osrm-sydney"
+    },
+    "wales": {
+      "host": "localhost",
+      "port": 5004,
+      "container_name": "osrm-wales"
+    },
+    "england": {
+      "host": "localhost",
+      "port": 5005,
+      "container_name": "osrm-england"
+    }
+  },
+  "directories": {
+    "base_dir": "/Users/abhishekkumbhar/Documents/s2-data-processing",
+    "download_dir": "data/downloadedfiles",
+    "combined_dir": "data/combinedfile",
+    "preprocessed_dir": "data/preprocessed",
+    "processed_dir": "data/processed",
+    "logs_dir": "logs"
+  },
+  "processing": {
+    "retention_days": 2,
+    "max_workers": 10,
+    "chunk_size": 1000,
+    "trip_break_threshold_minutes": 30,
+    "max_speed_threshold_kmh": 200
+  },
+  "schedule": {
+    "daily_run_time": "03:30",
+    "timezone": "UTC"
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "max_file_size_mb": 10,
+    "backup_count": 5
+  }
+}
