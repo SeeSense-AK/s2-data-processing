@@ -94,9 +94,9 @@ python scripts/main_pipeline.py
 
 # Run individual steps
 python scripts/step3_daily_combiner.py
-python scripts/step5_device_bifurcation.py
-python scripts/step6_interpolation.py  
-python scripts/step7_combine_upload.py
+python scripts/step4_device_bifurcation.py
+python scripts/step5_interpolation.py  
+python scripts/step6_combine_upload.py
 ```
 
 ### Scheduled Execution
@@ -132,9 +132,9 @@ data/
 
 1. **Input**: Individual CSV files from S3 (`summit2/mqtt-flespi-barra/csv/YYYY/MM/DD/`)
 2. **Step 3**: Download and combine into single daily CSV
-3. **Step 5**: Split by device regions into separate CSV files
-4. **Step 6**: Process each region through OSRM for interpolation
-5. **Step 7**: Combine all processed regions and upload to S3 (`summit2/mqtt-flespi-barra/dailytripscsv/`)
+3. **Step 4**: Split by device regions into separate CSV files
+4. **Step 5**: Process each region through OSRM for interpolation
+5. **Step 6**: Combine all processed regions and upload to S3 (`summit2/mqtt-flespi-barra/dailytripscsv/`)
 
 ## Monitoring
 
