@@ -43,7 +43,7 @@
     "logs_dir": "logs"
   },
   "processing": {
-    "retention_days": 2,
+    "retention_days": 7,
     "max_workers": 10,
     "chunk_size": 1000,
     "trip_break_threshold_minutes": 30,
