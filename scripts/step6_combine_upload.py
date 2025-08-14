@@ -37,14 +37,14 @@ class RegionalCombiner:
         # Set up directories
         self.base_dir = Path(self.config.get('directories.base_dir', str(project_root)))
         self.processed_dir = self.base_dir / self.config.get('directories.processed_dir', 'data/processed')
-        self.combined_dir = self.base_dir / self.config.get('directories.combined_dir', 'data/combinedfile')
+        self.final_output_dir = self.base_dir / self.config.get('directories.final_output_dir', 'data/finaloutput')
         
         # AWS settings
         self.bucket = self.config.get('aws.bucket_name')
         self.daily_trips_prefix = self.config.get('aws.daily_trips_prefix')
         
         # Ensure directories exist
-        self.combined_dir.mkdir(parents=True, exist_ok=True)
+        self.final_output_dir.mkdir(parents=True, exist_ok=True)
     
     def get_yesterday(self):
         """Get yesterday's date in local format."""
@@ -216,7 +216,7 @@ class RegionalCombiner:
             # Save combined file using utility function for consistent naming
             _, _, date_compact = normalize_date_format(date_str)
             output_filename = f"combined_trips_{date_compact}.csv"
-            output_path = self.combined_dir / output_filename
+            output_path = self.final_output_dir / output_filename
             
             combined_df.to_csv(output_path, index=False)
             
@@ -292,13 +292,15 @@ class RegionalCombiner:
             return False
     
     def cleanup_temporary_files(self, local_file_path: Path):
-        """Clean up temporary combined file."""
+        """Clean up temporary final output file (optional - you may want to keep these)."""
         try:
             if local_file_path.exists():
-                local_file_path.unlink()
-                self.logger.info(f"Cleaned up temporary file: {local_file_path}")
+                # Note: In most cases, you'll want to keep the final output files locally
+                # This method is here for consistency but may not be used
+                # local_file_path.unlink()
+                self.logger.info(f"Final output file retained locally: {local_file_path}")
         except Exception as e:
-            self.logger.warning(f"Error cleaning up temporary file: {e}")
+            self.logger.warning(f"Error in cleanup method: {e}")
     
     def process_date(self, date_str: str, interactive: bool = True, skip_if_exists: bool = True) -> bool:
         """Process combining and uploading for a specific date."""
@@ -335,11 +337,15 @@ class RegionalCombiner:
             upload_success = self.upload_to_s3(combined_file_path, date_str)
             
             if upload_success:
-                # Clean up temporary file in automated mode
+                # Keep final output files locally (they're valuable!)
+                # Only clean up in specific cases if needed
                 if not interactive:
-                    self.cleanup_temporary_files(combined_file_path)
+                    # Note: Changed behavior - we keep final output files
+                    self.logger.info(f"Final output retained locally: {combined_file_path}")
                 
                 self.logger.info(f"✅ Successfully processed {date_str}")
+                self.logger.info(f"📁 Local file: {combined_file_path}")
+                self.logger.info(f"☁️ S3 file: s3://{self.bucket}/{self.generate_s3_destination_key(date_str)}")
                 return True
             else:
                 self.logger.error(f"❌ Failed to upload {date_str}")
