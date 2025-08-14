@@ -29,6 +29,7 @@ sys.path.append(str(project_root))
 from scripts.utils.config_manager import ConfigManager
 from scripts.utils.logger_setup import setup_logger
 from scripts.utils.aws_helper import AWSHelper
+from scripts.utils.date_utils import normalize_date_format, get_yesterday_formats, get_today_formats
 
 
 class OSRMInterpolator:
@@ -60,12 +61,14 @@ class OSRMInterpolator:
             region_dir.mkdir(parents=True, exist_ok=True)
     
     def get_yesterday(self):
-        """Get yesterday's date in YYYY-MM-DD format."""
-        return (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')
+        """Get yesterday's date in local format."""
+        _, local_format, _ = get_yesterday_formats()
+        return local_format
     
     def get_today(self):
-        """Get today's date in YYYY-MM-DD format for testing."""
-        return datetime.utcnow().strftime('%Y-%m-%d')
+        """Get today's date in local format."""
+        _, local_format, _ = get_today_formats()
+        return local_format
     
     def find_unprocessed_dates(self) -> List[str]:
         """Find dates that have preprocessed data but haven't been processed yet."""
@@ -387,7 +390,7 @@ class OSRMInterpolator:
                 if pd.notna(current_time) and pd.notna(previous_time):
                     time_diff = current_time - previous_time
                     
-                    # Mark trip breaks (Step 6: > 600 seconds = -1)
+                    # Mark trip breaks (> threshold seconds = -1)
                     if time_diff > self.trip_break_threshold:
                         df.at[current_idx, 'time_s'] = -1
                         df.at[current_idx, 'trip_break'] = True
@@ -451,11 +454,12 @@ class OSRMInterpolator:
             # Steps 5 & 6: Calculate distances and times
             df = self.calculate_distances_and_times(df, osrm_url)
             
-            # Save processed file
-            output_dir = self.processed_dir / region / date_str
+            # Save processed file using utility function for consistent naming
+            _, date_folder, date_compact = normalize_date_format(date_str)
+            output_dir = self.processed_dir / region / date_folder
             output_dir.mkdir(parents=True, exist_ok=True)
             
-            output_filename = f"{region}_{date_str.replace('-', '')}_processed.csv"
+            output_filename = f"{region}_{date_compact}_processed.csv"
             output_path = output_dir / output_filename
             
             df.to_csv(output_path, index=False)
@@ -484,6 +488,9 @@ class OSRMInterpolator:
         try:
             self.logger.info(f"Starting OSRM interpolation for date: {date_str}")
             
+            # Use utility function to normalize date format
+            _, date_folder, date_compact = normalize_date_format(date_str)
+            
             regions_to_process = specific_regions if specific_regions else self.config.get_all_regions()
             successful_regions = []
             failed_regions = []
@@ -491,15 +498,15 @@ class OSRMInterpolator:
             for region in regions_to_process:
                 self.logger.info(f"Processing region: {region}")
                 
-                # Check if preprocessed file exists
-                preprocessed_file_path = self.preprocessed_dir / region / date_str / f"{region}_{date_str.replace('-', '')}.csv"
+                # Check if preprocessed file exists using consistent naming
+                preprocessed_file_path = self.preprocessed_dir / region / date_folder / f"{region}_{date_compact}.csv"
                 
                 if not preprocessed_file_path.exists():
                     self.logger.info(f"No preprocessed file found for {region} on {date_str}: {preprocessed_file_path}")
                     continue
                 
                 # Check if already processed
-                processed_dir_path = self.processed_dir / region / date_str
+                processed_dir_path = self.processed_dir / region / date_folder
                 if processed_dir_path.exists() and any(processed_dir_path.glob('*.csv')):
                     self.logger.info(f"Already processed {region} for {date_str}")
                     successful_regions.append(region)
