@@ -22,6 +22,7 @@ sys.path.append(str(project_root))
 from scripts.utils.config_manager import ConfigManager
 from scripts.utils.logger_setup import setup_logger
 from scripts.utils.aws_helper import AWSHelper
+from scripts.utils.date_utils import normalize_date_format, get_yesterday_formats, get_today_formats
 
 
 class RegionalCombiner:
@@ -46,12 +47,14 @@ class RegionalCombiner:
         self.combined_dir.mkdir(parents=True, exist_ok=True)
     
     def get_yesterday(self):
-        """Get yesterday's date in YYYY-MM-DD format."""
-        return (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')
+        """Get yesterday's date in local format."""
+        _, local_format, _ = get_yesterday_formats()
+        return local_format
     
     def get_today(self):
-        """Get today's date in YYYY-MM-DD format for testing."""
-        return datetime.utcnow().strftime('%Y-%m-%d')
+        """Get today's date in local format."""
+        _, local_format, _ = get_today_formats()
+        return local_format
     
     def prompt_for_date(self, default_date):
         """Prompt user for date to process."""
@@ -71,7 +74,8 @@ class RegionalCombiner:
                 date_input = input("Enter custom date (YYYY-MM-DD): ").strip()
                 if date_input:
                     try:
-                        datetime.strptime(date_input, '%Y-%m-%d')
+                        # Validate using utility function
+                        normalize_date_format(date_input)
                         return date_input
                     except ValueError:
                         print("Invalid date format. Using default.")
@@ -114,11 +118,7 @@ class RegionalCombiner:
     def check_s3_destination_exists(self, date_str: str) -> bool:
         """Check if the combined file already exists in S3."""
         try:
-            # Convert date format from YYYY-MM-DD to YYYY/MM/DD for S3 path
-            date_parts = date_str.split('-')
-            year, month, day = date_parts[0], date_parts[1], date_parts[2]
-            
-            destination_key = f'{self.daily_trips_prefix}year={year}/month={month}/day={day}/{year}{month}{day}_trips.csv'
+            destination_key = self.generate_s3_destination_key(date_str)
             
             exists = self.aws_helper.file_exists(destination_key)
             if exists:
@@ -134,23 +134,32 @@ class RegionalCombiner:
         """Collect all processed regional files for a specific date."""
         regional_files = {}
         
+        # Use utility function to normalize date format
+        _, date_folder, date_compact = normalize_date_format(date_str)
+        
         for region in self.config.get_all_regions():
-            region_date_dir = self.processed_dir / region / date_str
+            region_date_dir = self.processed_dir / region / date_folder
             
             if not region_date_dir.exists():
                 self.logger.debug(f"No processed data directory for {region} on {date_str}")
                 continue
             
-            # Find CSV files in the region/date directory
-            csv_files = list(region_date_dir.glob('*.csv'))
+            # Look for files with consistent naming pattern
+            expected_file = region_date_dir / f"{region}_{date_compact}_processed.csv"
             
-            if csv_files:
-                # Use the first CSV file found (should be only one)
-                regional_files[region] = csv_files[0]
-                file_size = csv_files[0].stat().st_size / 1024  # KB
-                self.logger.info(f"Found {region} file: {csv_files[0].name} ({file_size:.1f} KB)")
+            if expected_file.exists():
+                regional_files[region] = expected_file
+                file_size = expected_file.stat().st_size / 1024  # KB
+                self.logger.info(f"Found {region} file: {expected_file.name} ({file_size:.1f} KB)")
             else:
-                self.logger.warning(f"No CSV files found for {region} on {date_str}")
+                # Fallback: look for any CSV files in the directory
+                csv_files = list(region_date_dir.glob('*.csv'))
+                if csv_files:
+                    regional_files[region] = csv_files[0]
+                    file_size = csv_files[0].stat().st_size / 1024  # KB
+                    self.logger.warning(f"Using fallback file for {region}: {csv_files[0].name} ({file_size:.1f} KB)")
+                else:
+                    self.logger.warning(f"No CSV files found for {region} on {date_str}")
         
         return regional_files
     
@@ -204,8 +213,9 @@ class RegionalCombiner:
             combined_df = combined_df.sort_values(by=sort_columns).reset_index(drop=True)
             self.logger.info(f"Combined data sorted by: {sort_columns}")
             
-            # Save combined file
-            output_filename = f"combined_trips_{date_str.replace('-', '')}.csv"
+            # Save combined file using utility function for consistent naming
+            _, _, date_compact = normalize_date_format(date_str)
+            output_filename = f"combined_trips_{date_compact}.csv"
             output_path = self.combined_dir / output_filename
             
             combined_df.to_csv(output_path, index=False)
@@ -231,11 +241,15 @@ class RegionalCombiner:
     
     def generate_s3_destination_key(self, date_str: str) -> str:
         """Generate the S3 destination key for the combined trips file."""
-        # Convert date format from YYYY-MM-DD to YYYY/MM/DD for S3 path
-        date_parts = date_str.split('-')
-        year, month, day = date_parts[0], date_parts[1], date_parts[2]
+        # Use utility function to normalize date format
+        _, _, date_compact = normalize_date_format(date_str)
         
-        return f'{self.daily_trips_prefix}year={year}/month={month}/day={day}/{year}{month}{day}_trips.csv'
+        # Extract components for S3 path
+        year = date_compact[:4]
+        month = date_compact[4:6] 
+        day = date_compact[6:8]
+        
+        return f'{self.daily_trips_prefix}year={year}/month={month}/day={day}/{date_compact}_trips.csv'
     
     def upload_to_s3(self, local_file_path: Path, date_str: str) -> bool:
         """Upload the combined file to S3."""
