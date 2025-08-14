@@ -39,6 +39,7 @@
     "combined_dir": "data/combinedfile",
     "preprocessed_dir": "data/preprocessed",
     "processed_dir": "data/processed",
+    "final_output_dir": "data/finaloutput",
     "logs_dir": "logs"
   },
   "processing": {
