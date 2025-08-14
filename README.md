@@ -276,7 +276,7 @@ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for detailed solutions.
 
 ## 🔄 Data Retention
 
-- **Local preprocessed data**: 2 days (configurable)
+- **Local preprocessed data**: 7 days (configurable)
 - **Temporary downloads**: Cleaned after processing
 - **Logs**: Rotated at 10MB with 5 backups
 - **S3 processed data**: Permanent storage
