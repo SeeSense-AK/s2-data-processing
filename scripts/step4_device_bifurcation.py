@@ -137,7 +137,7 @@ class DeviceBifurcator:
             filename = csv_path.stem  # Remove .csv extension
             if filename.startswith('combined_') and len(filename) == 17:  # combined_YYYYMMDD
                 file_date_compact = filename[9:]  # Extract YYYYMMDD
-                expected_date_compact = expected_date.replace('/', '')
+                expected_date_compact = expected_date.replace('-', '')
                 
                 if file_date_compact == expected_date_compact:
                     self.logger.info(f"✅ File date matches expected date: {expected_date}")
