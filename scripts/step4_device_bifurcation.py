@@ -22,6 +22,7 @@ sys.path.append(str(project_root))
 from scripts.utils.config_manager import ConfigManager
 from scripts.utils.logger_setup import setup_logger
 from scripts.utils.aws_helper import AWSHelper
+from scripts.utils.date_utils import normalize_date_format, get_yesterday_formats, get_today_formats
 
 
 class DeviceBifurcator:
@@ -51,12 +52,14 @@ class DeviceBifurcator:
             region_dir.mkdir(parents=True, exist_ok=True)
     
     def get_yesterday(self):
-        """Get yesterday's date in YYYY/MM/DD format."""
-        return (datetime.utcnow() - timedelta(days=1)).strftime('%Y/%m/%d')
+        """Get yesterday's date in AWS format."""
+        _, _, compact = get_yesterday_formats()
+        return f"{compact[:4]}/{compact[4:6]}/{compact[6:8]}"
     
     def get_today(self):
-        """Get today's date in YYYY/MM/DD format for testing."""
-        return datetime.utcnow().strftime('%Y/%m/%d')
+        """Get today's date in AWS format."""
+        _, _, compact = get_today_formats()
+        return f"{compact[:4]}/{compact[4:6]}/{compact[6:8]}"
     
     def prompt_for_date(self, default_date):
         """Prompt user for date to process."""
@@ -73,10 +76,11 @@ class DeviceBifurcator:
             elif choice == '2':
                 return self.get_today()
             elif choice == '3':
-                date_input = input("Enter custom date (YYYY/MM/DD): ").strip()
+                date_input = input("Enter custom date (YYYY/MM/DD or YYYY-MM-DD): ").strip()
                 if date_input:
                     try:
-                        datetime.strptime(date_input, '%Y/%m/%d')
+                        # Validate using utility function
+                        normalize_date_format(date_input)
                         return date_input
                     except ValueError:
                         print("Invalid date format. Using default.")
@@ -95,8 +99,8 @@ class DeviceBifurcator:
     def find_local_combined_csv(self, date_str: str) -> Optional[Path]:
         """Find the local combined CSV file for the specified date."""
         try:
-            # Convert date format from YYYY/MM/DD to YYYYMMDD
-            date_compact = date_str.replace('/', '').replace('-', '')
+            # Use utility function to get compact format
+            _, _, date_compact = normalize_date_format(date_str)
             expected_filename = f"combined_{date_compact}.csv"
             expected_path = self.combined_dir / expected_filename
             
@@ -137,13 +141,16 @@ class DeviceBifurcator:
             filename = csv_path.stem  # Remove .csv extension
             if filename.startswith('combined_') and len(filename) == 17:  # combined_YYYYMMDD
                 file_date_compact = filename[9:]  # Extract YYYYMMDD
-                expected_date_compact = expected_date.replace('/', '').replace('-', '')
+                
+                # Use utility function to get expected compact format
+                _, _, expected_date_compact = normalize_date_format(expected_date)
                 
                 if file_date_compact == expected_date_compact:
                     self.logger.info(f"✅ File date matches expected date: {expected_date}")
                     return True
                 else:
-                    file_date_formatted = f"{file_date_compact[:4]}/{file_date_compact[4:6]}/{file_date_compact[6:8]}"
+                    # Convert file date to readable format for logging
+                    file_date_formatted = f"{file_date_compact[:4]}-{file_date_compact[4:6]}-{file_date_compact[6:8]}"
                     self.logger.warning(f"❌ File date mismatch: file={file_date_formatted}, expected={expected_date}")
                     return False
             else:
@@ -225,8 +232,10 @@ class DeviceBifurcator:
                 self.logger.warning("CSV file is empty")
                 return {}
             
-            # Create date subdirectories for each region
-            date_folder = date_str.replace('/', '-')  # Convert 2025/08/11 to 2025-08-11
+            # Use utility function to normalize date formats
+            _, date_folder, date_compact = normalize_date_format(date_str)
+            
+            self.logger.info(f"Using date folder: {date_folder}, filename date: {date_compact}")
             
             # Process data by regions
             region_counts = {}
@@ -256,12 +265,12 @@ class DeviceBifurcator:
             for region, row_indices in region_counts.items():
                 region_df = df.iloc[row_indices]
                 
-                # Create region/date directory
+                # Create region/date directory (always YYYY-MM-DD format)
                 region_dir = self.preprocessed_dir / region / date_folder
                 region_dir.mkdir(parents=True, exist_ok=True)
                 
-                # Save CSV file
-                output_file = region_dir / f"{region}_{date_str.replace('/', '')}.csv"
+                # Save CSV file (always region_YYYYMMDD.csv format)
+                output_file = region_dir / f"{region}_{date_compact}.csv"
                 region_df.to_csv(output_file, index=False)
                 
                 file_counts[region] = len(region_df)
@@ -350,7 +359,10 @@ class DeviceBifurcator:
             self.cleanup_old_data()
             
             self.logger.info("✅ Device bifurcation completed successfully")
-            self.logger.info(f"📁 Regional files created in {self.preprocessed_dir}/[region]/{date_str.replace('/', '-')}/")
+            
+            # Use utility function for consistent logging
+            _, date_folder, _ = normalize_date_format(date_str)
+            self.logger.info(f"📁 Regional files created in {self.preprocessed_dir}/[region]/{date_folder}/")
             
             return True
             
@@ -370,8 +382,8 @@ class DeviceBifurcator:
             if success:
                 print("✅ Device bifurcation completed successfully!")
                 
-                # Show results
-                date_folder = date_to_run.replace('/', '-')
+                # Show results using utility function
+                _, date_folder, _ = normalize_date_format(date_to_run)
                 print(f"\n📁 Regional files created in data/preprocessed/[region]/{date_folder}/")
                 
                 # List created files
@@ -397,7 +409,8 @@ class DeviceBifurcator:
         """Run the bifurcator in automated mode (for scheduling)."""
         try:
             if not date_str:
-                date_str = self.get_yesterday()
+                # Use yesterday in local format for automated mode
+                _, date_str, _ = get_yesterday_formats()
             
             self.logger.info(f"Running automated device bifurcation for {date_str}")
             success = self.process_date(date_str, interactive=False)
@@ -419,8 +432,8 @@ def main():
     """Main entry point for the script."""
     import argparse
     
-    parser = argparse.ArgumentParser(description='Device Bifurcation - Step 5 of S2 Data Pipeline')
-    parser.add_argument('--date', type=str, help='Date to process (YYYY/MM/DD). Defaults to yesterday.')
+    parser = argparse.ArgumentParser(description='Device Bifurcation - Step 4 of S2 Data Pipeline')
+    parser.add_argument('--date', type=str, help='Date to process (YYYY/MM/DD or YYYY-MM-DD). Defaults to yesterday.')
     parser.add_argument('--automated', action='store_true', help='Run in automated mode (no user prompts)')
     parser.add_argument('--config', type=str, help='Path to configuration file')
     
@@ -433,7 +446,10 @@ def main():
             success = bifurcator.run_automated(args.date)
             sys.exit(0 if success else 1)
         else:
-            bifurcator.run_interactive()
+            if args.date:
+                bifurcator.process_date(args.date, interactive=True)
+            else:
+                bifurcator.run_interactive()
             
     except Exception as e:
         print(f"Fatal error: {e}")
