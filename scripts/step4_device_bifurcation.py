@@ -96,7 +96,7 @@ class DeviceBifurcator:
         """Find the local combined CSV file for the specified date."""
         try:
             # Convert date format from YYYY/MM/DD to YYYYMMDD
-            date_compact = date_str.replace('-', '')
+            date_compact = date_str.replace('/', '').replace('-', '')
             expected_filename = f"combined_{date_compact}.csv"
             expected_path = self.combined_dir / expected_filename
             
@@ -137,7 +137,7 @@ class DeviceBifurcator:
             filename = csv_path.stem  # Remove .csv extension
             if filename.startswith('combined_') and len(filename) == 17:  # combined_YYYYMMDD
                 file_date_compact = filename[9:]  # Extract YYYYMMDD
-                expected_date_compact = expected_date.replace('-', '')
+                expected_date_compact = expected_date.replace('/', '').replace('-', '')
                 
                 if file_date_compact == expected_date_compact:
                     self.logger.info(f"✅ File date matches expected date: {expected_date}")
