@@ -244,7 +244,15 @@ class RegionalCombiner:
             
             self.logger.info(f"Uploading to S3: s3://{self.bucket}/{destination_key}")
             
-            success = self.aws_helper.upload_file(str(local_file_path), destination_key)
+            # Convert Path object to string for boto3 compatibility
+            local_file_str = str(local_file_path)
+            
+            # Add debug logging
+            self.logger.debug(f"Local file path: {local_file_str}")
+            self.logger.debug(f"Destination key: {destination_key}")
+            self.logger.debug(f"Bucket: {self.bucket}")
+            
+            success = self.aws_helper.upload_file(local_file_str, destination_key)
             
             if success:
                 self.logger.info("✅ File uploaded to S3 successfully")
