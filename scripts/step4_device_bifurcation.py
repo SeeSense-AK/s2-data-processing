@@ -96,7 +96,7 @@ class DeviceBifurcator:
         """Find the local combined CSV file for the specified date."""
         try:
             # Convert date format from YYYY/MM/DD to YYYYMMDD
-            date_compact = date_str.replace('/', '')
+            date_compact = date_str.replace('-', '')
             expected_filename = f"combined_{date_compact}.csv"
             expected_path = self.combined_dir / expected_filename
             
