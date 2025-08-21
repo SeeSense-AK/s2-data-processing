@@ -485,8 +485,11 @@ class EnhancedOSRMInterpolator:
                     else:
                         df.at[current_idx, 'time_s'] = time_diff
                 
-                # Handle first valid GPS point logic
-                if first_valid_gps and pd.notna(df.at[current_idx, 'snapped_lat']) and pd.notna(df.at[current_idx, 'snapped_lon']):
+                # Handle first valid GPS point logic with safer NA checking
+                current_lat_valid = pd.notna(df.at[current_idx, 'snapped_lat'])
+                current_lon_valid = pd.notna(df.at[current_idx, 'snapped_lon'])
+                
+                if first_valid_gps and current_lat_valid and current_lon_valid:
                     df.at[current_idx, 'distance_m'] = 0.0
                     first_valid_gps = False
                     continue
@@ -497,33 +500,46 @@ class EnhancedOSRMInterpolator:
                 previous_lat = df.at[previous_idx, 'snapped_lat']
                 previous_lon = df.at[previous_idx, 'snapped_lon']
                 
-                if all(pd.notna([current_lat, current_lon, previous_lat, previous_lon])):
+                # Safer NA checking to avoid boolean ambiguity
+                coords_valid = (pd.notna(current_lat) and pd.notna(current_lon) and 
+                              pd.notna(previous_lat) and pd.notna(previous_lon))
+                
+                if coords_valid:
                     # Use OSRM for accurate distance calculation
                     distance = self.calculate_osrm_distance(
                         previous_lat, previous_lon, current_lat, current_lon, osrm_url
                     )
-                    df.at[current_idx, 'distance_m'] = distance
+                    df.at[current_idx, 'distance_m'] = distance if distance is not None else 0.0
                 else:
                     df.at[current_idx, 'distance_m'] = 0.0
         
         # Update speed calculations based on new distances (like in IP-Final)
         for i in range(1, len(df)):
-            if (pd.notna(df.at[i, 'snapped_lat']) and pd.notna(df.at[i-1, 'snapped_lat']) and
-                df.at[i, 'time_s'] > 0):  # Don't update for trip breaks
-                
+            # Safer boolean checking for NA values
+            current_lat_valid = pd.notna(df.at[i, 'snapped_lat'])
+            previous_lat_valid = pd.notna(df.at[i-1, 'snapped_lat'])
+            time_s_value = df.at[i, 'time_s']
+            time_s_valid = pd.notna(time_s_value) and time_s_value > 0
+            
+            if current_lat_valid and previous_lat_valid and time_s_valid:
                 distance = df.at[i, 'distance_m']
                 time_sec = df.at[i, 'time_s']
                 
-                if time_sec > 0 and distance > 0:
+                # Additional safety checks
+                if (pd.notna(distance) and pd.notna(time_sec) and 
+                    time_sec > 0 and distance > 0):
                     # Calculate speed in km/h
                     speed_kmh = (distance / time_sec) * 3.6
                     # Apply speed threshold filter
                     if speed_kmh <= self.max_speed_threshold:
                         df.at[i, 'position_speed'] = speed_kmh
+                    else:
+                        df.at[i, 'position_speed'] = 0
                 else:
                     df.at[i, 'position_speed'] = 0
         
-        trip_breaks = df['trip_break'].sum()
+        # Safe counting with NA handling
+        trip_breaks = df['trip_break'].fillna(False).sum()
         valid_distances = df['distance_m'].notna().sum()
         
         self.logger.info(f"Distance and time calculations complete:")
