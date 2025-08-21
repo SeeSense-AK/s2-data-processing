@@ -1,10 +1,10 @@
 {
   "aws": {
     "bucket_name": "seesense-air",
-    "source_prefix": "summit2/mqtt-flespi-barra/test-csv/",
-    "daily_csv_prefix": "summit2/mqtt-flespi-barra-test/test-dailycsv/",
-    "daily_trips_prefix": "summit2/mqtt-flespi-barra-test/test-dailytripscsv/",
-    "abnormal_events_prefix": "summit2/mqtt-flespi-barra-test/test-abnormal-events-csv/",
+    "source_prefix": "summit2/mqtt-flespi-barra/csv/",
+    "daily_csv_prefix": "summit2/mqtt-flespi-barra/test-dailycsv/",
+    "daily_trips_prefix": "summit2/mqtt-flespi-barra/test-dailytripscsv/",
+    "abnormal_events_prefix": "summit2/mqtt-flespi-barra/test-abnormal-events-csv/",
     "region": "eu-west-1"
   },
   "osrm_servers": {
