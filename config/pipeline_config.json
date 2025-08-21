@@ -4,6 +4,7 @@
     "source_prefix": "summit2/mqtt-flespi-barra/csv/",
     "daily_csv_prefix": "summit2/mqtt-flespi-barra/test-dailycsv/",
     "daily_trips_prefix": "summit2/mqtt-flespi-barra/test-dailytripscsv/",
+    "abnormal_events_prefix": "summit2/mqtt-flespi-barra/test-abnormal-events-csv/",
     "region": "eu-west-1"
   },
   "osrm_servers": {
@@ -40,6 +41,7 @@
     "preprocessed_dir": "data/preprocessed",
     "processed_dir": "data/processed",
     "final_output_dir": "data/finaloutput",
+    "abnormal_events_dir": "data/abnormal-events",
     "logs_dir": "logs"
   },
   "processing": {
@@ -48,6 +50,45 @@
     "chunk_size": 1000,
     "trip_break_threshold_minutes": 30,
     "max_speed_threshold_kmh": 200
+  },
+  "abnormal_events": {
+    "quantile_threshold": 95,
+    "mad_threshold": 3,
+    "axis_dominance_factor": 2,
+    "required_columns": ["ain.12", "ain.13", "ain.14", "ain.15", "ain.16", "ain.17"],
+    "peak_columns": ["ain.12", "ain.13", "ain.14"],
+    "event_types": {
+      "hard_brake": {
+        "axis": "x",
+        "description": "Sudden deceleration event",
+        "severity_ranges": {
+          "1-3": "Mild braking",
+          "4-6": "Moderate braking",
+          "7-8": "Hard braking",
+          "9-10": "Emergency braking"
+        }
+      },
+      "swerve": {
+        "axis": "y",
+        "description": "Lateral movement event",
+        "severity_ranges": {
+          "1-3": "Gentle lane change",
+          "4-6": "Sharp turn",
+          "7-8": "Aggressive swerving",
+          "9-10": "Emergency maneuver"
+        }
+      },
+      "pothole": {
+        "axis": "z",
+        "description": "Vertical impact event",
+        "severity_ranges": {
+          "1-3": "Minor bump",
+          "4-6": "Road irregularity",
+          "7-8": "Significant pothole",
+          "9-10": "Major road defect"
+        }
+      }
+    }
   },
   "schedule": {
     "daily_run_time": "03:30",
