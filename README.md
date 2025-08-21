@@ -40,17 +40,7 @@ Step 5 (OSRM Interpolation) → Step 6 (Regional Combiner) → Step 7 (Abnormal 
 
 ## 🚨 Abnormal Events Detection (Step 7)
 
-### Purpose and Significance
-
-Abnormal events detection serves multiple critical purposes in fleet safety and road infrastructure analysis:
-
-1. **Driver Safety Monitoring**: Identifies aggressive or dangerous driving behaviors that could lead to accidents
-2. **Fleet Management**: Enables fleet operators to monitor driver performance and provide targeted training
-3. **Insurance Analytics**: Provides data for usage-based insurance models and risk assessment
-4. **Road Infrastructure Assessment**: Detects road quality issues and infrastructure defects through aggregated data
-5. **Preventive Maintenance**: Early detection of vehicle issues through unusual vibration patterns
-
-### Scientific Methodology
+### Methodology
 
 Our detection system employs a **Hybrid Quantile + Axis Dominance + MAD (Median Absolute Deviation)** approach:
 
@@ -122,26 +112,6 @@ Severity = 2 + ((peak_value - threshold) / (max_observed - threshold)) × 8
 - **Noise Filtering**: Removes sensor noise and vehicle vibrations
 - **Context Awareness**: Considers journey characteristics and duration
 - **Data Integrity**: Validates GPS coordinates and timestamps
-
-### Business Value
-
-#### **For Fleet Operators**
-- Reduce accident rates through driver behavior monitoring
-- Lower insurance premiums with usage-based insurance data
-- Improve driver training programs with specific incident data
-- Optimize routes to avoid problematic road sections
-
-#### **For Cities and Infrastructure**
-- Identify road maintenance priorities through aggregated pothole data
-- Monitor traffic safety at specific intersections and road segments
-- Plan infrastructure improvements based on driver behavior patterns
-- Quantify road quality improvements over time
-
-#### **For Insurance Companies**
-- Risk-based pricing using actual driving behavior data
-- Claims investigation support with precise incident data
-- Fraud detection through timeline and location verification
-- Portfolio risk assessment across different regions
 
 ### Output Format
 ```csv
