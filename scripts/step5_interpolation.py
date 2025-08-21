@@ -34,7 +34,7 @@ from scripts.utils.aws_helper import AWSHelper
 from scripts.utils.date_utils import normalize_date_format, get_yesterday_formats, get_today_formats
 
 
-class EnhancedOSRMInterpolator:
+class OSRMInterpolator:
     """Enhanced OSRM-based interpolation that eliminates stale GPS points."""
     
     def __init__(self, config_path=None):
@@ -765,7 +765,7 @@ def main():
     args = parser.parse_args()
     
     try:
-        interpolator = EnhancedOSRMInterpolator(args.config)
+        interpolator = OSRMInterpolator(args.config)
         
         if args.automated:
             success = interpolator.run_automated(args.date)
