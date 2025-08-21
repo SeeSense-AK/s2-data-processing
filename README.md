@@ -239,7 +239,7 @@ s2-data-processing/
 │   ├── step4_device_bifurcation.py   # Device region sorting
 │   ├── step5_interpolation.py        # OSRM interpolation
 │   ├── step6_combine_upload.py       # Regional combination & upload
-│   ├── step7_abnormal_events.py      # Abnormal events detection ✨ NEW
+│   ├── step7_abnormal_events.py      # Abnormal events detection
 │   └── utils/                        # Utility modules
 ├── config/                           # Configuration files
 ├── launch_daemon/                    # macOS Launch Daemon files
