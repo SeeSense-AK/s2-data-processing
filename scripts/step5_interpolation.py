@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-Step 5: OSRM Interpolation
+Step 5: Enhanced OSRM Interpolation
 Processes regional CSV files through OSRM for coordinate snapping, interpolation,
 distance calculation, and trip segmentation.
+
+Enhanced version that eliminates stale GPS points using advanced interpolation techniques.
 
 Author: SeeSense Data Pipeline
 """
@@ -32,13 +34,13 @@ from scripts.utils.aws_helper import AWSHelper
 from scripts.utils.date_utils import normalize_date_format, get_yesterday_formats, get_today_formats
 
 
-class OSRMInterpolator:
-    """Handles OSRM-based interpolation and distance calculation for regional data."""
+class EnhancedOSRMInterpolator:
+    """Enhanced OSRM-based interpolation that eliminates stale GPS points."""
     
     def __init__(self, config_path=None):
-        """Initialize the OSRMInterpolator with configuration."""
+        """Initialize the Enhanced OSRMInterpolator with configuration."""
         self.config = ConfigManager(config_path)
-        self.logger = setup_logger('osrm_interpolator', self.config.get_log_config())
+        self.logger = setup_logger('enhanced_osrm_interpolator', self.config.get_log_config())
         
         # Set up directories
         self.base_dir = Path(self.config.get('directories.base_dir', str(project_root)))
@@ -139,7 +141,7 @@ class OSRMInterpolator:
         """Snap a coordinate to the nearest road using OSRM."""
         try:
             url = f"{osrm_url}/nearest/v1/bike/{lon},{lat}"
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, timeout=10, headers={'Connection': 'close'})
             response.raise_for_status()
             
             data = response.json()
@@ -190,7 +192,7 @@ class OSRMInterpolator:
         """Preprocess the dataframe: filter, sort, and prepare for interpolation."""
         initial_count = len(df)
         
-        # Step 2: Remove rows with non-null device_serial_number
+        # Remove rows with non-null device_serial_number
         if 'device_serial_number' in df.columns:
             df = df[df['device_serial_number'].isna()].copy()
             filtered_count = len(df)
@@ -208,7 +210,7 @@ class OSRMInterpolator:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        # Step 3: Sort by device_id, timestamp, position_timestamp, record_seqnum
+        # Sort by device_id, timestamp, position_timestamp, record_seqnum
         sort_columns = ['device_id']
         for col in ['timestamp', 'position_timestamp', 'record_seqnum']:
             if col in df.columns:
@@ -225,11 +227,27 @@ class OSRMInterpolator:
         df['time_s'] = pd.NA
         df['trip_break'] = False
         
+        # Calculate timestamps and time differences (from IP-Final approach)
+        if 'timestamp' in df.columns:
+            df['time_diff'] = df['timestamp'].diff().fillna(0)
+        
         return df
     
-    def snap_coordinates(self, df: pd.DataFrame, osrm_url: str) -> pd.DataFrame:
-        """Snap coordinates to roads using OSRM."""
-        self.logger.info("Starting coordinate snapping...")
+    def snap_coordinates_enhanced(self, df: pd.DataFrame, osrm_url: str) -> pd.DataFrame:
+        """Enhanced coordinate snapping based on IP-Final approach."""
+        self.logger.info("Starting enhanced coordinate snapping...")
+        
+        # Remove duplicate coordinates to reduce API calls (IP-Final approach)
+        # Mark duplicates as NA but preserve first occurrence
+        df_coords = df[['position_latitude', 'position_longitude']].copy()
+        
+        # Find duplicates and mark them as NA (keep='first' preserves the first occurrence)
+        duplicate_mask = df_coords.duplicated(subset=['position_latitude', 'position_longitude'], keep='first')
+        df.loc[duplicate_mask, ['position_latitude', 'position_longitude']] = pd.NA
+        
+        # Count duplicates
+        num_na = df[['position_latitude', 'position_longitude']].isna().any(axis=1).sum()
+        self.logger.info(f"Marked {num_na} duplicate coordinates as NA")
         
         # Find rows with valid coordinates
         valid_coords = df[
@@ -237,130 +255,192 @@ class OSRMInterpolator:
             df['position_longitude'].notna() &
             (df['position_latitude'] != 0) &
             (df['position_longitude'] != 0)
-        ].copy()
+        ]
         
         if valid_coords.empty:
             self.logger.warning("No valid coordinates found for snapping")
             return df
         
-        # Remove duplicate coordinates to reduce API calls
-        unique_coords = valid_coords.drop_duplicates(subset=['position_latitude', 'position_longitude'])
-        self.logger.info(f"Snapping {len(unique_coords)} unique coordinates out of {len(valid_coords)} total valid coordinates")
+        self.logger.info(f"Snapping {len(valid_coords)} unique coordinates")
         
-        # Snap unique coordinates
-        snapped_coords = {}
-        
-        for idx, row in tqdm(unique_coords.iterrows(), total=len(unique_coords), desc="Snapping coordinates"):
+        # Snap coordinates with progress bar
+        for idx, row in tqdm(valid_coords.iterrows(), total=len(valid_coords), desc="Snapping coordinates"):
             lat, lon = row['position_latitude'], row['position_longitude']
-            coord_key = (lat, lon)
             
             snapped = self.snap_coordinate_to_road(lat, lon, osrm_url)
             if snapped:
-                snapped_coords[coord_key] = snapped
-                time.sleep(0.05)  # Rate limiting
+                df.at[idx, 'snapped_lat'] = snapped[0]
+                df.at[idx, 'snapped_lon'] = snapped[1]
+                df.at[idx, 'was_snapped'] = True
             else:
-                snapped_coords[coord_key] = (lat, lon)  # Keep original if snapping fails
-        
-        # Apply snapped coordinates back to dataframe
-        for idx, row in df.iterrows():
-            if pd.notna(row['position_latitude']) and pd.notna(row['position_longitude']):
-                coord_key = (row['position_latitude'], row['position_longitude'])
-                if coord_key in snapped_coords:
-                    snapped_lat, snapped_lon = snapped_coords[coord_key]
-                    df.at[idx, 'snapped_lat'] = snapped_lat
-                    df.at[idx, 'snapped_lon'] = snapped_lon
-                    df.at[idx, 'was_snapped'] = True
+                # Keep original if snapping fails
+                df.at[idx, 'snapped_lat'] = lat
+                df.at[idx, 'snapped_lon'] = lon
+                df.at[idx, 'was_snapped'] = False
+            
+            time.sleep(0.05)  # Rate limiting
         
         snapped_count = df['snapped_lat'].notna().sum()
-        self.logger.info(f"Successfully snapped {snapped_count} coordinates")
+        self.logger.info(f"Successfully processed {snapped_count} coordinates")
         
         return df
     
-    def interpolate_missing_points(self, df: pd.DataFrame, osrm_url: str) -> pd.DataFrame:
-        """Interpolate missing coordinates using OSRM routing."""
-        self.logger.info("Starting interpolation of missing points...")
+    def interpolate_gaps_enhanced(self, df: pd.DataFrame, osrm_url: str) -> pd.DataFrame:
+        """Enhanced gap interpolation based on IP-Final approach."""
+        self.logger.info("Starting enhanced gap interpolation...")
         
-        # Process each device separately
-        for device_id in df['device_id'].unique():
-            if pd.isna(device_id):
+        # Find indices of known snapped points
+        known_indices = df[df['snapped_lat'].notna()].index.tolist()
+        
+        if len(known_indices) < 2:
+            self.logger.warning("Not enough known points for interpolation")
+            return df
+        
+        # Process each gap between consecutive known points
+        for i in tqdm(range(len(known_indices) - 1), desc="Processing gaps"):
+            idx1 = known_indices[i]
+            idx2 = known_indices[i + 1]
+            
+            # Get the bounding points
+            p1 = (df.at[idx1, 'snapped_lat'], df.at[idx1, 'snapped_lon'])
+            p2 = (df.at[idx2, 'snapped_lat'], df.at[idx2, 'snapped_lon'])
+            
+            # Get the route geometry between points
+            route_coords = self.get_route_geometry(p1, p2, osrm_url)
+            if not route_coords or len(route_coords) < 2:
                 continue
             
-            device_df = df[df['device_id'] == device_id].copy()
-            device_indices = device_df.index.tolist()
+            # Calculate cumulative distances along route
+            route_dists = [0]
+            for j in range(1, len(route_coords)):
+                dist = geodesic(route_coords[j-1], route_coords[j]).meters
+                route_dists.append(route_dists[-1] + dist)
             
-            # Find indices with valid snapped coordinates
-            valid_indices = device_df[device_df['snapped_lat'].notna()].index.tolist()
+            total_distance = route_dists[-1]
+            if total_distance == 0:
+                continue
             
-            if len(valid_indices) < 2:
-                continue  # Need at least 2 points for interpolation
-            
-            # Process gaps between consecutive valid points
-            for i in range(len(valid_indices) - 1):
-                start_idx = valid_indices[i]
-                end_idx = valid_indices[i + 1]
+            # Process each row in the gap
+            progress_meters = 0
+            for row_idx in range(idx1 + 1, idx2):
+                # Calculate expected progress based on speed and time (IP-Final approach)
+                if pd.notna(df.at[row_idx, 'position_speed']) and df.at[row_idx, 'time_diff'] > 0:
+                    speed_mps = df.at[row_idx, 'position_speed'] / 3.6  # km/h to m/s
+                    time_sec = df.at[row_idx, 'time_diff']
+                    progress_meters += speed_mps * time_sec
+                else:
+                    # Linear interpolation if no speed data
+                    position_ratio = (row_idx - idx1) / (idx2 - idx1)
+                    progress_meters = total_distance * position_ratio
                 
-                # Get indices of missing points between start and end
-                missing_indices = [idx for idx in device_indices if start_idx < idx < end_idx]
+                # Clamp progress to route bounds
+                progress_meters = max(0, min(progress_meters, total_distance))
                 
-                if not missing_indices:
-                    continue
+                # Find closest point along route
+                closest_route_idx = np.argmin(np.abs(np.array(route_dists) - progress_meters))
+                interpolated_point = route_coords[closest_route_idx]
                 
-                # Get route geometry between start and end points
-                start_point = (df.at[start_idx, 'snapped_lat'], df.at[start_idx, 'snapped_lon'])
-                end_point = (df.at[end_idx, 'snapped_lat'], df.at[end_idx, 'snapped_lon'])
-                
-                route_coords = self.get_route_geometry(start_point, end_point, osrm_url)
-                if not route_coords or len(route_coords) < 2:
-                    continue
-                
-                # Calculate cumulative distances along route
-                route_distances = [0]
-                for j in range(1, len(route_coords)):
-                    dist = geodesic(route_coords[j-1], route_coords[j]).meters
-                    route_distances.append(route_distances[-1] + dist)
-                
-                total_route_distance = route_distances[-1]
-                if total_route_distance == 0:
-                    continue
-                
-                # Interpolate missing points along the route
-                progress_distance = 0
-                
-                for missing_idx in missing_indices:
-                    # Calculate expected progress based on speed and time
-                    time_diff = df.at[missing_idx, 'timestamp'] - df.at[start_idx, 'timestamp']
-                    if pd.notna(df.at[missing_idx, 'position_speed']):
-                        speed_mps = df.at[missing_idx, 'position_speed'] / 3.6  # km/h to m/s
-                        progress_distance += speed_mps * max(1, time_diff / len(missing_indices))
-                    else:
-                        # Linear interpolation if no speed data
-                        position_ratio = (missing_idx - start_idx) / (end_idx - start_idx)
-                        progress_distance = total_route_distance * position_ratio
-                    
-                    # Clamp progress to route bounds
-                    progress_distance = max(0, min(progress_distance, total_route_distance))
-                    
-                    # Find closest point on route
-                    closest_route_idx = np.argmin(np.abs(np.array(route_distances) - progress_distance))
-                    interpolated_point = route_coords[closest_route_idx]
-                    
-                    # Snap interpolated point to road
-                    snapped_point = self.snap_coordinate_to_road(interpolated_point[0], interpolated_point[1], osrm_url)
-                    if snapped_point:
-                        df.at[missing_idx, 'snapped_lat'] = snapped_point[0]
-                        df.at[missing_idx, 'snapped_lon'] = snapped_point[1]
-                        df.at[missing_idx, 'was_snapped'] = True
-                
-                time.sleep(0.1)  # Rate limiting for route requests
+                # Snap interpolated point to road for accuracy
+                snapped_point = self.snap_coordinate_to_road(interpolated_point[0], interpolated_point[1], osrm_url)
+                if snapped_point:
+                    df.at[row_idx, 'snapped_lat'] = snapped_point[0]
+                    df.at[row_idx, 'snapped_lon'] = snapped_point[1]
+                    df.at[row_idx, 'was_snapped'] = True
         
         interpolated_count = df['snapped_lat'].notna().sum()
-        self.logger.info(f"Interpolation complete. Total points with coordinates: {interpolated_count}")
+        self.logger.info(f"After gap interpolation: {interpolated_count} points have coordinates")
         
         return df
     
-    def calculate_distances_and_times(self, df: pd.DataFrame, osrm_url: str) -> pd.DataFrame:
-        """Calculate distances and time differences between consecutive points."""
-        self.logger.info("Calculating distances and time differences...")
+    def fill_missing_coordinates_comprehensive(self, df: pd.DataFrame, osrm_url: str) -> pd.DataFrame:
+        """Comprehensive coordinate filling based on IP-Final approach."""
+        self.logger.info("Starting comprehensive coordinate filling...")
+        
+        original_na_count = df['snapped_lat'].isna().sum()
+        
+        # Find rows with valid coordinates
+        valid_coords = df[df['snapped_lat'].notna() & df['snapped_lon'].notna()]
+        
+        if valid_coords.empty:
+            self.logger.warning("No valid coordinates found to use as reference")
+            return df
+        
+        # Track the last valid position
+        last_valid_lat = None
+        last_valid_lon = None
+        
+        # Process each row with progress tracking
+        for i in tqdm(range(len(df)), desc="Filling gaps"):
+            if pd.notna(df.at[i, 'snapped_lat']) and pd.notna(df.at[i, 'snapped_lon']):
+                last_valid_lat = df.at[i, 'snapped_lat']
+                last_valid_lon = df.at[i, 'snapped_lon']
+                continue
+            
+            if last_valid_lat is None or last_valid_lon is None:
+                continue
+            
+            # Find next valid point
+            next_valid_idx = None
+            for j in range(i + 1, len(df)):
+                if pd.notna(df.at[j, 'snapped_lat']) and pd.notna(df.at[j, 'snapped_lon']):
+                    next_valid_idx = j
+                    break
+            
+            if next_valid_idx is None:
+                continue
+            
+            # Get route between points
+            try:
+                coordinates = f"{last_valid_lon},{last_valid_lat};{df.at[next_valid_idx, 'snapped_lon']},{df.at[next_valid_idx, 'snapped_lat']}"
+                url = f"{osrm_url}/route/v1/bike/{coordinates}?overview=full&geometries=polyline&alternatives=false&continue_straight=false"
+                
+                response = requests.get(url, timeout=10)
+                data = response.json()
+                
+                if 'routes' in data and len(data['routes']) > 0:
+                    route_geometry = data['routes'][0]['geometry']
+                    route_coords = polyline.decode(route_geometry)
+                    # Convert to (lon, lat) for consistent indexing
+                    route_coords = [(lon, lat) for lat, lon in route_coords]
+                    
+                    num_missing = next_valid_idx - i
+                    
+                    if len(route_coords) >= 2:
+                        selected_points = []
+                        if num_missing <= len(route_coords) - 2:
+                            # Evenly distribute points along route
+                            indices = np.linspace(1, len(route_coords) - 2, num_missing, dtype=int)
+                            selected_points = [route_coords[idx] for idx in indices]
+                        else:
+                            # Use all intermediate points and repeat last one if needed
+                            for idx in range(1, len(route_coords) - 1):
+                                selected_points.append(route_coords[idx])
+                            for _ in range(num_missing - len(selected_points)):
+                                selected_points.append(route_coords[-2])
+                        
+                        # Assign interpolated points
+                        for j, point in zip(range(i, next_valid_idx), selected_points):
+                            df.at[j, 'snapped_lon'] = point[0]
+                            df.at[j, 'snapped_lat'] = point[1]
+                            df.at[j, 'was_snapped'] = True
+                            
+            except Exception as e:
+                self.logger.warning(f"Error getting route for gap filling: {e}")
+                continue
+        
+        final_na_count = df['snapped_lat'].isna().sum()
+        filled_count = original_na_count - final_na_count
+        
+        self.logger.info(f"Comprehensive filling complete:")
+        self.logger.info(f"  - Original NA values: {original_na_count}")
+        self.logger.info(f"  - Remaining NA values: {final_na_count}")
+        self.logger.info(f"  - Coordinates filled: {filled_count}")
+        
+        return df
+    
+    def calculate_distances_and_times_enhanced(self, df: pd.DataFrame, osrm_url: str) -> pd.DataFrame:
+        """Enhanced distance and time calculation with trip break detection."""
+        self.logger.info("Calculating distances and time differences with trip break detection...")
         
         # Process each device separately
         for device_id in df['device_id'].unique():
@@ -373,10 +453,15 @@ class OSRMInterpolator:
             if len(device_indices) < 2:
                 continue
             
+            self.logger.debug(f"Processing device {device_id} with {len(device_indices)} records")
+            
             # Set first point distance and time to 0
             first_idx = device_indices[0]
             df.at[first_idx, 'distance_m'] = 0.0
             df.at[first_idx, 'time_s'] = 0.0
+            
+            # Track if this is the first valid GPS point for trip break logic
+            first_valid_gps = True
             
             # Calculate for subsequent points
             for i in range(1, len(device_indices)):
@@ -390,23 +475,30 @@ class OSRMInterpolator:
                 if pd.notna(current_time) and pd.notna(previous_time):
                     time_diff = current_time - previous_time
                     
-                    # Mark trip breaks (> threshold seconds = -1)
+                    # Mark trip breaks (> threshold seconds)
                     if time_diff > self.trip_break_threshold:
-                        df.at[current_idx, 'time_s'] = -1
+                        df.at[current_idx, 'time_s'] = -1  # Trip break marker
                         df.at[current_idx, 'trip_break'] = True
                         df.at[current_idx, 'distance_m'] = 0.0  # Reset distance at trip break
+                        first_valid_gps = True  # Reset for new trip
                         continue
                     else:
                         df.at[current_idx, 'time_s'] = time_diff
                 
-                # Calculate distance if we have coordinates
+                # Handle first valid GPS point logic
+                if first_valid_gps and pd.notna(df.at[current_idx, 'snapped_lat']) and pd.notna(df.at[current_idx, 'snapped_lon']):
+                    df.at[current_idx, 'distance_m'] = 0.0
+                    first_valid_gps = False
+                    continue
+                
+                # Calculate distance if we have coordinates for both points
                 current_lat = df.at[current_idx, 'snapped_lat']
                 current_lon = df.at[current_idx, 'snapped_lon']
                 previous_lat = df.at[previous_idx, 'snapped_lat']
                 previous_lon = df.at[previous_idx, 'snapped_lon']
                 
                 if all(pd.notna([current_lat, current_lon, previous_lat, previous_lon])):
-                    # Use OSRM for distance calculation
+                    # Use OSRM for accurate distance calculation
                     distance = self.calculate_osrm_distance(
                         previous_lat, previous_lon, current_lat, current_lon, osrm_url
                     )
@@ -414,11 +506,34 @@ class OSRMInterpolator:
                 else:
                     df.at[current_idx, 'distance_m'] = 0.0
         
-        self.logger.info("Distance and time calculations complete")
+        # Update speed calculations based on new distances (like in IP-Final)
+        for i in range(1, len(df)):
+            if (pd.notna(df.at[i, 'snapped_lat']) and pd.notna(df.at[i-1, 'snapped_lat']) and
+                df.at[i, 'time_s'] > 0):  # Don't update for trip breaks
+                
+                distance = df.at[i, 'distance_m']
+                time_sec = df.at[i, 'time_s']
+                
+                if time_sec > 0 and distance > 0:
+                    # Calculate speed in km/h
+                    speed_kmh = (distance / time_sec) * 3.6
+                    # Apply speed threshold filter
+                    if speed_kmh <= self.max_speed_threshold:
+                        df.at[i, 'position_speed'] = speed_kmh
+                else:
+                    df.at[i, 'position_speed'] = 0
+        
+        trip_breaks = df['trip_break'].sum()
+        valid_distances = df['distance_m'].notna().sum()
+        
+        self.logger.info(f"Distance and time calculations complete:")
+        self.logger.info(f"  - Trip breaks detected: {trip_breaks}")
+        self.logger.info(f"  - Valid distances calculated: {valid_distances}")
+        
         return df
     
     def process_region_file(self, file_path: Path, region: str, date_str: str) -> bool:
-        """Process a single regional CSV file through OSRM interpolation."""
+        """Process a single regional CSV file through enhanced OSRM interpolation."""
         try:
             self.logger.info(f"Processing {region} file: {file_path}")
             
@@ -445,14 +560,17 @@ class OSRMInterpolator:
                 self.logger.warning(f"No data remaining after preprocessing for {file_path}")
                 return False
             
-            # Step 4: Snap coordinates to roads
-            df = self.snap_coordinates(df, osrm_url)
+            # Step 2: Enhanced coordinate snapping (removes duplicates)
+            df = self.snap_coordinates_enhanced(df, osrm_url)
             
-            # Step 4: Interpolate missing points
-            df = self.interpolate_missing_points(df, osrm_url)
+            # Step 3: Enhanced gap interpolation between known points
+            df = self.interpolate_gaps_enhanced(df, osrm_url)
             
-            # Steps 5 & 6: Calculate distances and times
-            df = self.calculate_distances_and_times(df, osrm_url)
+            # Step 4: Comprehensive coordinate filling for remaining gaps
+            df = self.fill_missing_coordinates_comprehensive(df, osrm_url)
+            
+            # Step 5: Enhanced distance and time calculations with trip breaks
+            df = self.calculate_distances_and_times_enhanced(df, osrm_url)
             
             # Save processed file using utility function for consistent naming
             _, date_folder, date_compact = normalize_date_format(date_str)
@@ -464,17 +582,22 @@ class OSRMInterpolator:
             
             df.to_csv(output_path, index=False)
             
-            # Log summary
+            # Log comprehensive summary
             snapped_count = df['was_snapped'].sum()
             trip_breaks = df['trip_break'].sum()
             valid_distances = df['distance_m'].notna().sum()
+            remaining_na = df['snapped_lat'].isna().sum()
+            total_coordinates = len(df)
+            filled_percentage = ((total_coordinates - remaining_na) / total_coordinates) * 100
             
-            self.logger.info(f"✅ Processed {region} for {date_str}:")
+            self.logger.info(f"✅ Enhanced processing complete for {region} on {date_str}:")
             self.logger.info(f"   - Output: {output_path}")
-            self.logger.info(f"   - Rows processed: {len(df)}")
+            self.logger.info(f"   - Total rows: {len(df)}")
+            self.logger.info(f"   - Coordinates filled: {filled_percentage:.1f}% ({total_coordinates - remaining_na}/{total_coordinates})")
             self.logger.info(f"   - Coordinates snapped: {snapped_count}")
             self.logger.info(f"   - Trip breaks detected: {trip_breaks}")
-            self.logger.info(f"   - Valid distances calculated: {valid_distances}")
+            self.logger.info(f"   - Valid distances: {valid_distances}")
+            self.logger.info(f"   - Remaining stale GPS points: {remaining_na}")
             
             return True
             
@@ -484,9 +607,9 @@ class OSRMInterpolator:
             return False
     
     def process_date(self, date_str: str, specific_regions: List[str] = None) -> bool:
-        """Process all regions for a specific date."""
+        """Process all regions for a specific date using enhanced interpolation."""
         try:
-            self.logger.info(f"Starting OSRM interpolation for date: {date_str}")
+            self.logger.info(f"Starting enhanced OSRM interpolation for date: {date_str}")
             
             # Use utility function to normalize date format
             _, date_folder, date_compact = normalize_date_format(date_str)
@@ -512,14 +635,14 @@ class OSRMInterpolator:
                     successful_regions.append(region)
                     continue
                 
-                # Process the file
+                # Process the file with enhanced interpolation
                 if self.process_region_file(preprocessed_file_path, region, date_str):
                     successful_regions.append(region)
                 else:
                     failed_regions.append(region)
             
             # Summary
-            self.logger.info(f"Processing complete for {date_str}:")
+            self.logger.info(f"Enhanced processing complete for {date_str}:")
             self.logger.info(f"  ✅ Successful regions: {successful_regions}")
             if failed_regions:
                 self.logger.warning(f"  ❌ Failed regions: {failed_regions}")
@@ -532,7 +655,7 @@ class OSRMInterpolator:
             return False
     
     def run_interactive(self):
-        """Run the interpolator in interactive mode."""
+        """Run the enhanced interpolator in interactive mode."""
         try:
             # Find unprocessed dates
             unprocessed_dates = self.find_unprocessed_dates()
@@ -556,6 +679,7 @@ class OSRMInterpolator:
             if choice == '1':
                 # Process all unprocessed dates
                 for date_str in unprocessed_dates:
+                    print(f"\n🔄 Processing {date_str}...")
                     self.process_date(date_str)
             elif choice == '2':
                 # Process specific date
@@ -568,6 +692,7 @@ class OSRMInterpolator:
                     date_idx = int(date_choice) - 1
                     if 0 <= date_idx < len(unprocessed_dates):
                         selected_date = unprocessed_dates[date_idx]
+                        print(f"\n🔄 Processing {selected_date}...")
                         self.process_date(selected_date)
                     else:
                         print("Invalid selection")
@@ -577,6 +702,7 @@ class OSRMInterpolator:
                 # Process yesterday's data (default)
                 yesterday = self.get_yesterday()
                 if yesterday in unprocessed_dates:
+                    print(f"\n🔄 Processing yesterday's data: {yesterday}...")
                     self.process_date(yesterday)
                 else:
                     print(f"Yesterday's data ({yesterday}) is already processed or not available")
@@ -589,19 +715,19 @@ class OSRMInterpolator:
             sys.exit(1)
     
     def run_automated(self, date_str: str = None) -> bool:
-        """Run the interpolator in automated mode (for scheduling)."""
+        """Run the enhanced interpolator in automated mode (for scheduling)."""
         try:
             if not date_str:
                 date_str = self.get_yesterday()
             
-            self.logger.info(f"Running automated OSRM interpolation for {date_str}")
+            self.logger.info(f"Running automated enhanced OSRM interpolation for {date_str}")
             success = self.process_date(date_str)
             
             if success:
-                self.logger.info("Automated OSRM interpolation completed successfully")
+                self.logger.info("Automated enhanced OSRM interpolation completed successfully")
                 return True
             else:
-                self.logger.error("Automated OSRM interpolation failed")
+                self.logger.error("Automated enhanced OSRM interpolation failed")
                 return False
                 
         except Exception as e:
@@ -611,10 +737,10 @@ class OSRMInterpolator:
 
 
 def main():
-    """Main entry point for the script."""
+    """Main entry point for the enhanced interpolation script."""
     import argparse
     
-    parser = argparse.ArgumentParser(description='OSRM Interpolation - Step 5 of S2 Data Pipeline')
+    parser = argparse.ArgumentParser(description='Enhanced OSRM Interpolation - Step 5 of S2 Data Pipeline')
     parser.add_argument('--date', type=str, help='Date to process (YYYY-MM-DD). Defaults to yesterday.')
     parser.add_argument('--region', type=str, help='Specific region to process (optional)')
     parser.add_argument('--automated', action='store_true', help='Run in automated mode (no user prompts)')
@@ -623,7 +749,7 @@ def main():
     args = parser.parse_args()
     
     try:
-        interpolator = OSRMInterpolator(args.config)
+        interpolator = EnhancedOSRMInterpolator(args.config)
         
         if args.automated:
             success = interpolator.run_automated(args.date)
@@ -631,12 +757,14 @@ def main():
         else:
             if args.date:
                 regions = [args.region] if args.region else None
+                print(f"🚀 Starting enhanced interpolation for {args.date}")
                 interpolator.process_date(args.date, regions)
+                print("✅ Enhanced interpolation completed!")
             else:
                 interpolator.run_interactive()
             
     except Exception as e:
-        print(f"Fatal error: {e}")
+        print(f"❌ Fatal error: {e}")
         sys.exit(1)
 
 
