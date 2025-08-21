@@ -485,11 +485,11 @@ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for detailed solutions.
 
 ## 📊 Performance Metrics
 
-- **Execution Time**: ~6 minutes for typical daily data volume
-- **Memory Usage**: <2GB peak during processing
+- **Execution Time**: ~30 minutes for typical daily data volume
+- **Memory Usage**: <5GB peak during processing
 - **Storage**: 2-day local retention, permanent S3 storage
 - **Throughput**: ~4,000 GPS points per minute through OSRM
-- **Reliability**: 99.5% successful daily executions
+- **Reliability**: 99.8% successful daily executions
 
 ## 🔄 Data Retention
 
