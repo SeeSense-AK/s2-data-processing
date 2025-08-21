@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Main Pipeline Orchestrator
-Runs the complete S2 data processing pipeline (Steps 3-6).
+Main Pipeline Orchestrator (Updated with Step 7)
+Runs the complete S2 data processing pipeline (Steps 3-7).
 
 Author: SeeSense Data Pipeline
 """
@@ -32,7 +32,7 @@ class S2DataPipeline:
         yesterday = datetime.utcnow() - timedelta(days=1)
         return {
             'aws_format': yesterday.strftime('%Y/%m/%d'),  # For Step 3
-            'local_format': yesterday.strftime('%Y-%m-%d')  # For Steps 4-6
+            'local_format': yesterday.strftime('%Y-%m-%d')  # For Steps 4-7
         }
     
     def run_step3_daily_combiner(self, date_aws_format: str) -> bool:
@@ -123,6 +123,29 @@ class S2DataPipeline:
             self.logger.debug(traceback.format_exc())
             return False
     
+    def run_step7_abnormal_events(self, date_local_format: str) -> bool:
+        """Run Step 7: Abnormal Events Detection."""
+        try:
+            self.logger.info("🔄 Starting Step 7: Abnormal Events Detection")
+            
+            from scripts.step7_abnormal_events import AbnormalEventsDetector
+            
+            detector = AbnormalEventsDetector()
+            success = detector.run_automated(date_local_format)
+            
+            if success:
+                self.logger.info("✅ Step 7 completed successfully")
+                return True
+            else:
+                self.logger.warning("⚠️ Step 7 failed (but pipeline continues)")
+                return True  # Don't fail the pipeline if abnormal events fails
+                
+        except Exception as e:
+            self.logger.error(f"❌ Step 7 error: {e}")
+            self.logger.debug(traceback.format_exc())
+            self.logger.warning("⚠️ Step 7 failed (but pipeline continues)")
+            return True  # Don't fail the pipeline if abnormal events fails
+    
     def run_pipeline(self, date_aws_format: str = None, date_local_format: str = None, 
                     skip_steps: list = None, only_steps: list = None) -> bool:
         """
@@ -132,7 +155,7 @@ class S2DataPipeline:
             date_aws_format: Date in YYYY/MM/DD format for AWS operations
             date_local_format: Date in YYYY-MM-DD format for local operations
             skip_steps: List of step numbers to skip (e.g., [3, 4])
-            only_steps: List of step numbers to run only (e.g., [5, 6])
+            only_steps: List of step numbers to run only (e.g., [5, 6, 7])
         """
         # Get yesterday's date if not provided
         if not date_aws_format or not date_local_format:
@@ -143,7 +166,7 @@ class S2DataPipeline:
         skip_steps = skip_steps or []
         
         # Determine which steps to run
-        all_steps = [3, 4, 5, 6]
+        all_steps = [3, 4, 5, 6, 7]  # Added Step 7
         if only_steps:
             steps_to_run = [step for step in only_steps if step in all_steps]
         else:
@@ -180,6 +203,17 @@ class S2DataPipeline:
         if 6 in steps_to_run:
             if not self.run_step6_combine_upload(date_local_format):
                 pipeline_success = False
+                if self._should_stop_on_failure():
+                    return False
+        
+        # Step 7: Abnormal Events Detection (New)
+        if 7 in steps_to_run:
+            # Note: Step 7 doesn't fail the pipeline even if it encounters errors
+            # This ensures that missing accelerometer data doesn't break the existing workflow
+            step7_success = self.run_step7_abnormal_events(date_local_format)
+            if not step7_success:
+                self.logger.warning("⚠️ Step 7 had issues but pipeline continues")
+                # Don't set pipeline_success to False for Step 7
         
         return pipeline_success
     
@@ -192,7 +226,7 @@ class S2DataPipeline:
     def run_interactive(self):
         """Run pipeline in interactive mode."""
         try:
-            print("🚀 S2 Data Processing Pipeline")
+            print("🚀 S2 Data Processing Pipeline (Steps 3-7)")
             print("=" * 50)
             
             # Get date options
@@ -200,171 +234,159 @@ class S2DataPipeline:
             
             print(f"\nDate options:")
             print(f"1. Yesterday: {yesterday['local_format']}")
-            print(f"2. Custom date")
+            print(f"2. Today: {datetime.utcnow().strftime('%Y-%m-%d')}")
+            print(f"3. Custom date")
             
-            date_choice = input("Select date option (1-2) [default: 1]: ").strip()
+            choice = input(f"Select option (1-3) or press Enter for yesterday [{yesterday['local_format']}]: ").strip()
             
-            if date_choice == '2':
-                date_input = input("Enter date (YYYY-MM-DD): ").strip()
-                try:
-                    date_obj = datetime.strptime(date_input, '%Y-%m-%d')
-                    date_local_format = date_input
-                    date_aws_format = date_obj.strftime('%Y/%m/%d')
-                except ValueError:
-                    print("Invalid date format. Using yesterday.")
-                    date_local_format = yesterday['local_format']
-                    date_aws_format = yesterday['aws_format']
+            if choice == '1' or choice == '':
+                date_aws = yesterday['aws_format']
+                date_local = yesterday['local_format']
+            elif choice == '2':
+                today = datetime.utcnow()
+                date_aws = today.strftime('%Y/%m/%d')
+                date_local = today.strftime('%Y-%m-%d')
+            elif choice == '3':
+                date_input = input("Enter custom date (YYYY-MM-DD): ").strip()
+                if date_input:
+                    try:
+                        date_obj = datetime.strptime(date_input, '%Y-%m-%d')
+                        date_aws = date_obj.strftime('%Y/%m/%d')
+                        date_local = date_input
+                    except ValueError:
+                        print("Invalid date format. Using yesterday.")
+                        date_aws = yesterday['aws_format']
+                        date_local = yesterday['local_format']
+                else:
+                    date_aws = yesterday['aws_format']
+                    date_local = yesterday['local_format']
             else:
-                date_local_format = yesterday['local_format']
-                date_aws_format = yesterday['aws_format']
+                date_aws = yesterday['aws_format']
+                date_local = yesterday['local_format']
             
-            # Get step options
+            # Step selection
             print(f"\nStep options:")
-            print("1. Run all steps (3-6)")
-            print("2. Run specific steps")
-            print("3. Skip specific steps")
+            print(f"1. Run all steps (3-7)")
+            print(f"2. Run core pipeline only (3-6)")
+            print(f"3. Run abnormal events only (7)")
+            print(f"4. Custom step selection")
             
-            step_choice = input("Select step option (1-3) [default: 1]: ").strip()
+            step_choice = input("Select option (1-4) or press Enter for all steps [1]: ").strip()
             
-            skip_steps = None
+            skip_steps = []
             only_steps = None
             
             if step_choice == '2':
-                steps_input = input("Enter steps to run (e.g., 3,4,5,6): ").strip()
-                try:
-                    only_steps = [int(s.strip()) for s in steps_input.split(',')]
-                except ValueError:
-                    print("Invalid input. Running all steps.")
+                skip_steps = [7]
             elif step_choice == '3':
-                steps_input = input("Enter steps to skip (e.g., 3,4): ").strip()
-                try:
-                    skip_steps = [int(s.strip()) for s in steps_input.split(',')]
-                except ValueError:
-                    print("Invalid input. Running all steps.")
+                only_steps = [7]
+            elif step_choice == '4':
+                steps_input = input("Enter steps to run (e.g., 3,4,5,6,7): ").strip()
+                if steps_input:
+                    try:
+                        only_steps = [int(x.strip()) for x in steps_input.split(',')]
+                        only_steps = [x for x in only_steps if x in [3, 4, 5, 6, 7]]
+                    except ValueError:
+                        print("Invalid input. Running all steps.")
             
-            # Run pipeline with logging context
-            with PipelineLogger('S2_Pipeline', self.config.get_log_config()) as logger:
+            # Run pipeline with PipelineLogger context manager
+            with PipelineLogger(self.config.get_log_config()) as logger:
                 self.logger = logger
-                success = self.run_pipeline(
-                    date_aws_format=date_aws_format,
-                    date_local_format=date_local_format,
-                    skip_steps=skip_steps,
-                    only_steps=only_steps
-                )
-                
-                if success:
-                    print("\n🎉 Pipeline completed successfully!")
-                else:
-                    print("\n⚠️  Pipeline completed with some failures. Check logs for details.")
+                success = self.run_pipeline(date_aws, date_local, skip_steps, only_steps)
+            
+            if success:
+                print("✅ Pipeline completed successfully!")
+            else:
+                print("❌ Pipeline completed with some failures!")
+            
+            return success
             
         except KeyboardInterrupt:
-            print("\n❌ Pipeline interrupted by user")
-            sys.exit(0)
-        except Exception as e:
-            print(f"❌ Pipeline error: {e}")
-            sys.exit(1)
-    
-    def run_automated(self, date_local_format: str = None, skip_steps: list = None) -> bool:
-        """Run pipeline in automated mode (for cron scheduling)."""
-        try:
-            # Get yesterday's date if not provided
-            if not date_local_format:
-                yesterday = self.get_yesterday()
-                date_local_format = yesterday['local_format']
-                date_aws_format = yesterday['aws_format']
-            else:
-                # Convert local format to AWS format
-                date_obj = datetime.strptime(date_local_format, '%Y-%m-%d')
-                date_aws_format = date_obj.strftime('%Y/%m/%d')
-            
-            # Run pipeline with logging context
-            with PipelineLogger('S2_Pipeline_Automated', self.config.get_log_config()) as logger:
-                self.logger = logger
-                success = self.run_pipeline(
-                    date_aws_format=date_aws_format,
-                    date_local_format=date_local_format,
-                    skip_steps=skip_steps
-                )
-                
-                return success
-                
-        except Exception as e:
-            print(f"❌ Automated pipeline error: {e}")
+            if self.logger:
+                self.logger.info("❌ Pipeline interrupted by user")
             return False
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"❌ Unexpected error in interactive mode: {e}")
+                self.logger.debug(traceback.format_exc())
+            return False
+    
+    def run_automated(self, date_aws_format: str = None, date_local_format: str = None, 
+                     skip_steps: list = None, only_steps: list = None) -> bool:
+        """Run pipeline in automated mode (for cron jobs)."""
+        with PipelineLogger(self.config.get_log_config()) as logger:
+            self.logger = logger
+            return self.run_pipeline(date_aws_format, date_local_format, skip_steps, only_steps)
 
 
 def main():
-    """Main entry point for the pipeline."""
+    """Main entry point for command line usage."""
     import argparse
     
-    parser = argparse.ArgumentParser(description='S2 Data Processing Pipeline')
-    parser.add_argument('--date', type=str, help='Date to process (YYYY-MM-DD). Defaults to yesterday.')
-    parser.add_argument('--automated', action='store_true', help='Run in automated mode (no user prompts)')
+    parser = argparse.ArgumentParser(description='S2 Data Processing Pipeline (Steps 3-7)')
+    parser.add_argument('--date', type=str, help='Date to process (YYYY-MM-DD format)')
+    parser.add_argument('--automated', action='store_true', help='Run in automated mode')
     parser.add_argument('--skip-steps', type=str, help='Comma-separated list of steps to skip (e.g., 3,4)')
-    parser.add_argument('--only-steps', type=str, help='Comma-separated list of steps to run only (e.g., 5,6)')
+    parser.add_argument('--only-steps', type=str, help='Comma-separated list of steps to run only (e.g., 5,6,7)')
     parser.add_argument('--config', type=str, help='Path to configuration file')
     
     args = parser.parse_args()
     
-    try:
-        pipeline = S2DataPipeline(args.config)
-        
-        # Parse step arguments
-        skip_steps = None
-        only_steps = None
-        
-        if args.skip_steps:
-            try:
-                skip_steps = [int(s.strip()) for s in args.skip_steps.split(',')]
-            except ValueError:
-                print("❌ Invalid skip-steps format. Use comma-separated numbers (e.g., 3,4)")
-                sys.exit(1)
-        
-        if args.only_steps:
-            try:
-                only_steps = [int(s.strip()) for s in args.only_steps.split(',')]
-            except ValueError:
-                print("❌ Invalid only-steps format. Use comma-separated numbers (e.g., 5,6)")
-                sys.exit(1)
-        
-        if args.automated:
-            success = pipeline.run_automated(args.date, skip_steps)
-            sys.exit(0 if success else 1)
+    # Parse step arguments
+    skip_steps = []
+    only_steps = None
+    
+    if args.skip_steps:
+        try:
+            skip_steps = [int(x.strip()) for x in args.skip_steps.split(',')]
+        except ValueError:
+            print("Error: Invalid skip-steps format. Use comma-separated numbers (e.g., 3,4)")
+            sys.exit(1)
+    
+    if args.only_steps:
+        try:
+            only_steps = [int(x.strip()) for x in args.only_steps.split(',')]
+        except ValueError:
+            print("Error: Invalid only-steps format. Use comma-separated numbers (e.g., 5,6,7)")
+            sys.exit(1)
+    
+    # Initialize pipeline
+    pipeline = S2DataPipeline(args.config)
+    
+    if args.automated:
+        # Automated mode - use yesterday if no date specified
+        if args.date:
+            date_obj = datetime.strptime(args.date, '%Y-%m-%d')
+            date_aws = date_obj.strftime('%Y/%m/%d')
+            date_local = args.date
         else:
-            if args.date or skip_steps or only_steps:
-                # Run with specific parameters
-                yesterday = pipeline.get_yesterday()
-                date_local_format = args.date or yesterday['local_format']
+            yesterday = pipeline.get_yesterday()
+            date_aws = yesterday['aws_format']
+            date_local = yesterday['local_format']
+        
+        success = pipeline.run_automated(date_aws, date_local, skip_steps, only_steps)
+        sys.exit(0 if success else 1)
+    else:
+        # Interactive mode
+        if args.date:
+            try:
+                date_obj = datetime.strptime(args.date, '%Y-%m-%d')
+                date_aws = date_obj.strftime('%Y/%m/%d')
+                date_local = args.date
                 
-                try:
-                    date_obj = datetime.strptime(date_local_format, '%Y-%m-%d')
-                    date_aws_format = date_obj.strftime('%Y/%m/%d')
-                except ValueError:
-                    print("❌ Invalid date format. Use YYYY-MM-DD")
-                    sys.exit(1)
-                
-                with PipelineLogger('S2_Pipeline', pipeline.config.get_log_config()) as logger:
+                with PipelineLogger(pipeline.config.get_log_config()) as logger:
                     pipeline.logger = logger
-                    success = pipeline.run_pipeline(
-                        date_aws_format=date_aws_format,
-                        date_local_format=date_local_format,
-                        skip_steps=skip_steps,
-                        only_steps=only_steps
-                    )
-                    
-                    if success:
-                        print("🎉 Pipeline completed successfully!")
-                    else:
-                        print("⚠️  Pipeline completed with failures. Check logs for details.")
-                        sys.exit(1)
-            else:
-                # Run interactive mode
-                pipeline.run_interactive()
+                    success = pipeline.run_pipeline(date_aws, date_local, skip_steps, only_steps)
                 
-    except Exception as e:
-        print(f"❌ Fatal pipeline error: {e}")
-        sys.exit(1)
+                print("✅ Pipeline completed successfully!" if success else "❌ Pipeline completed with failures!")
+                sys.exit(0 if success else 1)
+            except ValueError:
+                print("Error: Invalid date format. Use YYYY-MM-DD")
+                sys.exit(1)
+        else:
+            success = pipeline.run_interactive()
+            sys.exit(0 if success else 1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
