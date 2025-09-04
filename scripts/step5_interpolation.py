@@ -227,9 +227,9 @@ class OSRMInterpolator:
         df['time_s'] = pd.NA
         df['trip_break'] = False
         
-        # Calculate timestamps and time differences (from IP-Final approach)
+        # Calculate time differences per device (grouped)
         if 'timestamp' in df.columns:
-            df['time_diff'] = df['timestamp'].diff().fillna(0)
+            df['time_diff'] = df.groupby('device_id')['timestamp'].diff().fillna(0)
         
         return df
     
