@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Service identification -->
+    <key>Label</key>
+    <string>com.seesense.docker.health.check</string>
+    
+    <!-- Script to execute -->
+    <key>Program</key>
+    <string>/usr/local/bin/seesense/docker_health_check.sh</string>
+    
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>/Users/abhishekkumbhar/Documents/s2-data-processing</string>
+    
+    <!-- Schedule: Run daily at 2:30 AM -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+    
+    <!-- Environment variables -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+        <key>HOME</key>
+        <string>/Users/abhishekkumbhar</string>
+    </dict>
+    
+    <!-- Logging configuration -->
+    <key>StandardOutPath</key>
+    <string>/var/log/seesense/docker_health_check.out</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/seesense/docker_health_check.err</string>
+    
+    <!-- Run even when user is not logged in -->
+    <key>RunAtLoad</key>
+    <false/>
+    
+    <!-- Keep the job alive -->
+    <key>KeepAlive</key>
+    <false/>
+    
+    <!-- Process control -->
+    <key>ProcessType</key>
+    <string>Background</string>
+    
+    <!-- Timeout for the job (10 minutes max) -->
+    <key>TimeOut</key>
+    <integer>600</integer>
+    
+    <!-- Resource limits -->
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfProcesses</key>
+        <integer>10</integer>
+    </dict>
+    
+    <!-- Start only if network is available -->
+    <key>StartOnMount</key>
+    <false/>
+    
+    <!-- User and group -->
+    <key>UserName</key>
+    <string>abhishekkumbhar</string>
+</dict>
+</plist>
