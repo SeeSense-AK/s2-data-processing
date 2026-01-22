@@ -45,6 +45,26 @@ class RegionalCombiner:
         
         # Ensure directories exist
         self.final_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Column transformation settings
+        self.desired_column_order = [
+            'battery_voltage', 'device_id', 'device_name', 'device_serial_number',
+            'device_temperature', 'gsm_signal_quality', 'ident', 'loaded_battery_voltage',
+            'position_accuracy', 'position_altitude', 'position_direction',
+            'position_latitude', 'position_longitude', 'position_pdop', 'position_speed',
+            'position_timestamp', 'record_seqnum', 'report_reason', 'rtc_timestamp',
+            'server_timestamp', 'timestamp', 'trip_status', 'distance_m', 'time_s'
+        ]
+        
+        self.columns_to_drop = [
+            'position_latitude', 'position_longitude', 'was_snapped',
+            'trip_break', 'time_diff', 'source_region'
+        ]
+        
+        self.rename_dict = {
+            'snapped_lat': 'position_latitude',
+            'snapped_lon': 'position_longitude'
+        }
     
     def get_yesterday(self):
         """Get yesterday's date in local format."""
@@ -213,9 +233,24 @@ class RegionalCombiner:
             combined_df = combined_df.sort_values(by=sort_columns).reset_index(drop=True)
             self.logger.info(f"Combined data sorted by: {sort_columns}")
             
-            # Save combined file using utility function for consistent naming
+            # --- START OF NEW PROCESSING (from process_csv.py) ---
+            self.logger.info("Applying column transformations (rename, reorder, drop)...")
+            
+            # 1. Drop unwanted columns
+            combined_df = combined_df.drop(columns=[col for col in self.columns_to_drop if col in combined_df.columns])
+            
+            # 2. Rename snapped columns
+            combined_df = combined_df.rename(columns=self.rename_dict)
+            
+            # 3. Reorder columns
+            existing_columns = [col for col in self.desired_column_order if col in combined_df.columns]
+            extra_columns = [col for col in combined_df.columns if col not in existing_columns]
+            combined_df = combined_df[existing_columns + extra_columns]
+            # --- END OF NEW PROCESSING ---
+            
+            # Save combined file using updated naming convention
             _, _, date_compact = normalize_date_format(date_str)
-            output_filename = f"combined_trips_{date_compact}.csv"
+            output_filename = f"{date_compact}.csv"
             output_path = self.final_output_dir / output_filename
             
             combined_df.to_csv(output_path, index=False)
@@ -249,7 +284,7 @@ class RegionalCombiner:
         month = date_compact[4:6] 
         day = date_compact[6:8]
         
-        return f'{self.daily_trips_prefix}year={year}/month={month}/day={day}/{date_compact}_trips.csv'
+        return f'{self.daily_trips_prefix}year={year}/month={month}/day={day}/{date_compact}.csv'
     
     def upload_to_s3(self, local_file_path: Path, date_str: str) -> bool:
         """Upload the combined file to S3."""

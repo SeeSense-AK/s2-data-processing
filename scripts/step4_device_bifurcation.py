@@ -38,10 +38,13 @@ class DeviceBifurcator:
         self.base_dir = Path(self.config.get('directories.base_dir', str(project_root)))
         self.combined_dir = self.base_dir / self.config.get('directories.combined_dir', 'data/combinedfile')
         self.preprocessed_dir = self.base_dir / self.config.get('directories.preprocessed_dir', 'data/preprocessed')
+        self.processed_dir = self.base_dir / self.config.get('directories.processed_dir', 'data/processed')
+        self.final_output_dir = self.base_dir / self.config.get('directories.final_output_dir', 'data/finaloutput')
+        self.abnormal_events_dir = self.base_dir / 'data/abnormal-events'
         
         # Settings
         self.bucket = self.config.get('aws.bucket_name')
-        self.retention_days = self.config.get('processing.retention_days', 2)
+        self.retention_days = self.config.get('processing.retention_days', 5)
         
         # Ensure directories exist
         self.preprocessed_dir.mkdir(parents=True, exist_ok=True)
@@ -296,29 +299,65 @@ class DeviceBifurcator:
             cutoff_date = datetime.utcnow() - timedelta(days=self.retention_days)
             removed_count = 0
             
-            for region_dir in self.preprocessed_dir.iterdir():
-                if not region_dir.is_dir():
+            # 1. Clean up regional date-based directories (preprocessed and processed)
+            for parent_dir in [self.preprocessed_dir, self.processed_dir]:
+                if not parent_dir.exists():
                     continue
-                
-                for date_dir in region_dir.iterdir():
-                    if not date_dir.is_dir():
+                    
+                for region_dir in parent_dir.iterdir():
+                    if not region_dir.is_dir():
                         continue
                     
-                    try:
-                        # Parse date from directory name (format: 2025-08-11)
-                        date_obj = datetime.strptime(date_dir.name, '%Y-%m-%d')
+                    for date_dir in region_dir.iterdir():
+                        if not date_dir.is_dir():
+                            continue
                         
-                        if date_obj < cutoff_date:
-                            self.logger.info(f"Removing old data: {date_dir}")
-                            shutil.rmtree(date_dir)
-                            removed_count += 1
+                        try:
+                            # Parse date from directory name (format: 2025-08-11)
+                            date_obj = datetime.strptime(date_dir.name, '%Y-%m-%d')
                             
-                    except ValueError:
-                        # Skip directories that don't match date format
+                            if date_obj < cutoff_date:
+                                self.logger.info(f"Removing old data directory: {date_dir}")
+                                shutil.rmtree(date_dir)
+                                removed_count += 1
+                                
+                        except ValueError:
+                            continue
+            
+            # 2. Clean up file-based directories (finaloutput and abnormal-events)
+            for parent_dir in [self.final_output_dir, self.abnormal_events_dir, self.combined_dir]:
+                if not parent_dir.exists():
+                    continue
+                    
+                for file_path in parent_dir.iterdir():
+                    if not file_path.is_file() or file_path.suffix != '.csv':
                         continue
+                    
+                    # Try to extract date from filename (YYYYMMDD.csv or combined_YYYYMMDD.csv)
+                    filename = file_path.stem
+                    date_part = None
+                    
+                    if len(filename) == 8 and filename.isdigit(): # YYYYMMDD.csv
+                        date_part = filename
+                    elif filename.startswith('combined_') and len(filename) == 17: # combined_YYYYMMDD
+                        date_part = filename[9:]
+                    elif filename.startswith('combined_trips_') and len(filename) == 23: # combined_trips_YYYYMMDD
+                        date_part = filename[15:]
+                    elif filename.endswith('_abnormal_events') and len(filename) == 24: # YYYYMMDD_abnormal_events
+                        date_part = filename[:8]
+                        
+                    if date_part:
+                        try:
+                            date_obj = datetime.strptime(date_part, '%Y%m%d')
+                            if date_obj < cutoff_date:
+                                self.logger.info(f"Removing old data file: {file_path}")
+                                file_path.unlink()
+                                removed_count += 1
+                        except ValueError:
+                            continue
             
             if removed_count > 0:
-                self.logger.info(f"Cleaned up {removed_count} old date directories")
+                self.logger.info(f"Cleaned up {removed_count} old items")
             else:
                 self.logger.info("No old data to clean up")
                 

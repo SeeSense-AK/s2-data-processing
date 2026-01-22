@@ -2,8 +2,8 @@
   "aws": {
     "bucket_name": "seesense-air",
     "source_prefix": "summit2/mqtt-flespi-barra/csv/",
-    "daily_csv_prefix": "summit2/mqtt-flespi-barra/test-dailycsv/",
-    "daily_trips_prefix": "summit2/mqtt-flespi-barra/test-dailytripscsv/",
+    "daily_csv_prefix": "summit2/mqtt-flespi-barra/dailycsv/",
+    "daily_trips_prefix": "summit2/mqtt-flespi-barra/dailytripscsv/",
     "abnormal_events_prefix": "summit2/mqtt-flespi-barra/test-abnormal-events-csv/",
     "region": "eu-west-1"
   },
@@ -45,7 +45,7 @@
     "logs_dir": "logs"
   },
   "processing": {
-    "retention_days": 7,
+    "retention_days": 5,
     "max_workers": 10,
     "chunk_size": 1000,
     "trip_break_threshold_minutes": 30,
@@ -55,8 +55,19 @@
     "quantile_threshold": 95,
     "mad_threshold": 3,
     "axis_dominance_factor": 2,
-    "required_columns": ["ain.12", "ain.13", "ain.14", "ain.15", "ain.16", "ain.17"],
-    "peak_columns": ["ain.12", "ain.13", "ain.14"],
+    "required_columns": [
+      "ain.12",
+      "ain.13",
+      "ain.14",
+      "ain.15",
+      "ain.16",
+      "ain.17"
+    ],
+    "peak_columns": [
+      "ain.12",
+      "ain.13",
+      "ain.14"
+    ],
     "event_types": {
       "hard_brake": {
         "axis": "x",

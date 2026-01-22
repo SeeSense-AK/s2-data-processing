@@ -43,7 +43,7 @@ class AbnormalEventsDetector:
         
         # AWS settings
         self.bucket = self.config.get('aws.bucket_name')
-        self.abnormal_events_prefix = 'test-abnormal-events-csv/'
+        self.abnormal_events_prefix = self.config.get('aws.abnormal_events_prefix', 'summit2/mqtt-flespi-barra/test-abnormal-events-csv/')
         
         # Detection parameters (configurable)
         self.quantile_threshold = self.config.get('abnormal_events.quantile_threshold', 95)
@@ -51,8 +51,8 @@ class AbnormalEventsDetector:
         self.axis_dominance_factor = self.config.get('abnormal_events.axis_dominance_factor', 2)
         
         # Required accelerometer columns
-        self.required_accel_columns = ['ain.12', 'ain.13', 'ain.14', 'ain.15', 'ain.16', 'ain.17']
-        self.peak_columns = ['ain.12', 'ain.13', 'ain.14']  # peak_x, peak_y, peak_z
+        self.required_accel_columns = self.config.get('abnormal_events.required_columns', ['ain.12', 'ain.13', 'ain.14', 'ain.15', 'ain.16', 'ain.17'])
+        self.peak_columns = self.config.get('abnormal_events.peak_columns', ['ain.12', 'ain.13', 'ain.14'])
         
         # Ensure directories exist
         self.abnormal_events_dir.mkdir(parents=True, exist_ok=True)
@@ -82,10 +82,10 @@ class AbnormalEventsDetector:
         }).copy()
         
         # Remove rows with missing coordinates
-        df_clean = df_clean.dropna(subset=['snapped_lat', 'snapped_lon'])
+        df_clean = df_clean.dropna(subset=['position_latitude', 'position_longitude'])
         
         # Remove (0,0) coordinates
-        df_clean = df_clean.query('snapped_lat != 0 or snapped_lon != 0')
+        df_clean = df_clean.query('position_latitude != 0 or position_longitude != 0')
         
         # Remove non-event rows (where all peak values are 0 or NaN)
         df_active = df_clean[
@@ -170,8 +170,8 @@ class AbnormalEventsDetector:
                 events.append({
                     'event_type': 'hard_brake',
                     'original_index': idx,
-                    'latitude': row['snapped_lat'],
-                    'longitude': row['snapped_lon'],
+                    'latitude': row['position_latitude'],
+                    'longitude': row['position_longitude'],
                     'peak_value': row['peak_x'],
                     'severity': severity,
                     'timestamp': row.get('timestamp', ''),
@@ -188,8 +188,8 @@ class AbnormalEventsDetector:
                 events.append({
                     'event_type': 'swerve',
                     'original_index': idx,
-                    'latitude': row['snapped_lat'],
-                    'longitude': row['snapped_lon'],
+                    'latitude': row['position_latitude'],
+                    'longitude': row['position_longitude'],
                     'peak_value': row['peak_y'],
                     'severity': severity,
                     'timestamp': row.get('timestamp', ''),
@@ -206,8 +206,8 @@ class AbnormalEventsDetector:
                 events.append({
                     'event_type': 'pothole',
                     'original_index': idx,
-                    'latitude': row['snapped_lat'],
-                    'longitude': row['snapped_lon'],
+                    'latitude': row['position_latitude'],
+                    'longitude': row['position_longitude'],
                     'peak_value': row['peak_z'],
                     'severity': severity,
                     'timestamp': row.get('timestamp', ''),
@@ -262,7 +262,7 @@ class AbnormalEventsDetector:
         _, date_folder, date_compact = normalize_date_format(date_str)
         
         # Look for file with expected naming pattern
-        expected_file = self.final_output_dir / f"{date_compact}_trips.csv"
+        expected_file = self.final_output_dir / f"{date_compact}.csv"
         
         if expected_file.exists():
             return expected_file
